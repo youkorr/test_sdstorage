@@ -25,8 +25,7 @@ void SdMmc::setup() {
       .format_if_mount_failed = false, .max_files = 5, .allocation_unit_size = 16 * 1024};
 
   sdmmc_host_t host = SDMMC_HOST_DEFAULT();
-  if (this->slot_ == 0) {
-    host.slot = SDMMC_HOST_SLOT_0;
+  host.slot = SDMMC_HOST_SLOT_0 + this->slot_;  // Utilise le slot configuré
   }
   if (this->high_speed_) {
     host.max_freq_khz = SDMMC_FREQ_HIGHSPEED;
