@@ -25,7 +25,7 @@ CONF_DATA3_PIN = "data3_pin"
 CONF_MODE_1BIT = "mode_1bit"
 CONF_POWER_CTRL_PIN = "power_ctrl_pin"
 CONF_FATFS_ROOT = "mount_point"
-CONF_HOST_SLOT = "host_slot"
+CONF_SLOT = "slot"
 CONF_HIGH_SPEED = "high_speed"
 
 sd_mmc_ns = cg.esphome_ns.namespace("sd_mmc")
@@ -78,7 +78,7 @@ CONFIG_SCHEMA = cv.Schema(
             }
         ),
         cv.Optional(CONF_FATFS_ROOT, default="/sd"): cv.string_strict,
-        cv.Optional(CONF_HOST_SLOT, default=1): cv.int_range(min=0, max=1),
+        cv.Optional(CONF_SLOT, default=0): cv.int_range(min=0, max=1),  # Ajout du slot
         cv.Optional(CONF_HIGH_SPEED, default=True): cv.boolean,
     }
 ).extend(cv.COMPONENT_SCHEMA)
@@ -94,7 +94,7 @@ async def to_code(config):
     cg.add(var.set_cmd_pin(config[CONF_CMD_PIN]))
     cg.add(var.set_data0_pin(config[CONF_DATA0_PIN]))
     cg.add(var.set_high_speed(config[CONF_HIGH_SPEED]))
-    cg.add(var.set_slot(config[CONF_HOST_SLOT]))
+    cg.add(var.set_slot(config[CONF_SLOT]))  # Ajout de la configuration du slot
     cg.add(var.set_mount_point(config[CONF_FATFS_ROOT]))
 
     if not config[CONF_MODE_1BIT]:
