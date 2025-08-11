@@ -5,7 +5,7 @@ from esphome.const import CONF_ID
 
 from .. import CONF_SD_MMC_ID, SdMmc, sd_mmc_ns
 
-DEPENDENCIES = ["sd_mmc_card", "storage"]
+DEPENDENCIES = ["sd_mmc", "storage"]
 sd_mmc_storage = sd_mmc_ns.class_("SD_MMC_Storage", cg.Component)
 
 
