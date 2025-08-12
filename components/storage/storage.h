@@ -55,9 +55,10 @@ class StorageComponent : public Component {
  private:
   std::string platform_;
   sd_mmc_card::SdMmc *sd_component_{nullptr};
+  
 };
 
-// Classe pour les images SD - HÉRITE CORRECTEMENT de display::BaseImage
+// FIXED: Inherit from display::BaseImage correctly
 class SdImageComponent : public Component, public display::BaseImage {
  public:
   SdImageComponent() = default;
@@ -245,3 +246,5 @@ class SdImageUnloadAction : public Action<Ts...> {
 
 }  // namespace storage
 }  // namespace esphome
+
+
