@@ -10,6 +10,7 @@ CODEOWNERS = ["@youkorr"]
 # Configuration constants
 CONF_STORAGE = "storage"
 CONF_PATH = "path"
+CONF_ROOT_PATH = "root_path"  # Added missing constant
 
 # Constants pour SD direct
 CONF_SD_COMPONENT = "sd_component"
@@ -17,6 +18,7 @@ CONF_SD_COMPONENT = "sd_component"
 # Constants pour les images SD
 CONF_SD_IMAGES = "sd_images"
 CONF_FILE_PATH = "file_path"
+CONF_BYTE_ORDER = "byte_order"  # Added missing constant
 
 storage_ns = cg.esphome_ns.namespace('storage')
 StorageComponent = storage_ns.class_('StorageComponent', cg.Component)
@@ -33,6 +35,12 @@ IMAGE_FORMAT = {
     "rgba": "RGBA",
 }
 
+# Byte order options
+BYTE_ORDER = {
+    "little_endian": "LITTLE_ENDIAN",
+    "big_endian": "BIG_ENDIAN",
+}
+
 SD_IMAGE_SCHEMA = cv.Schema({
     cv.Required(CONF_ID): cv.declare_id(SdImageComponent),
     cv.Required(CONF_FILE_PATH): cv.string,
@@ -43,12 +51,15 @@ SD_IMAGE_SCHEMA = cv.Schema({
     cv.Optional(CONF_FORMAT, default="rgb565"): cv.enum(IMAGE_FORMAT, lower=True),
     # Ajouter le type pour la compatibilité LVGL
     cv.Optional("type"): cv.enum(IMAGE_FORMAT, upper=True),
+    # Added byte_order support
+    cv.Optional(CONF_BYTE_ORDER, default="little_endian"): cv.enum(BYTE_ORDER, lower=True),
 }).extend(cv.COMPONENT_SCHEMA)
 
 CONFIG_SCHEMA = cv.Schema({
     cv.Required(CONF_PLATFORM): cv.one_of("sd_direct", lower=True),
     cv.Required(CONF_ID): cv.declare_id(StorageComponent),
     cv.Required(CONF_SD_COMPONENT): cv.use_id(cg.Component),
+    cv.Optional(CONF_ROOT_PATH, default="/"): cv.string,  # Added root_path support
     cv.Optional(CONF_SD_IMAGES, default=[]): cv.ensure_list(SD_IMAGE_SCHEMA),
 }).extend(cv.COMPONENT_SCHEMA)
 
@@ -83,9 +94,17 @@ def validate_image_config(img_config):
     return img_config
 
 def validate_storage_config(config):
+    # Validate root_path
+    if CONF_ROOT_PATH in config:
+        root_path = config[CONF_ROOT_PATH]
+        if not root_path.startswith("/"):
+            raise cv.Invalid("Root path must be absolute (start with '/')")
+    
+    # Validate images
     if CONF_SD_IMAGES in config:
         for img_config in config[CONF_SD_IMAGES]:
             validate_image_config(img_config)
+    
     return config
 
 # Application des validations
@@ -108,6 +127,10 @@ async def to_code(config):
     sd_component = await cg.get_variable(config[CONF_SD_COMPONENT])
     cg.add(var.set_sd_component(sd_component))
 
+    # Configuration du root_path
+    if CONF_ROOT_PATH in config:
+        cg.add(var.set_root_path(config[CONF_ROOT_PATH]))
+
     # Traitement des images SD
     if CONF_SD_IMAGES in config and config[CONF_SD_IMAGES]:
         for img_config in config[CONF_SD_IMAGES]:
@@ -127,6 +150,11 @@ async def process_sd_image_config(img_config, storage_component):
     # Configuration du format de sortie souhaité
     format_str = IMAGE_FORMAT[img_config[CONF_FORMAT]]
     cg.add(img_var.set_output_format_string(format_str))
+
+    # Configuration de l'ordre des bytes
+    if CONF_BYTE_ORDER in img_config:
+        byte_order_str = BYTE_ORDER[img_config[CONF_BYTE_ORDER]]
+        cg.add(img_var.set_byte_order_string(byte_order_str))
 
     # Pas de taille attendue pour JPEG/PNG (sera déterminée après décodage)
     # Pas de configuration des dimensions (autodétection)
