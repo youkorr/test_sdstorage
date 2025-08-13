@@ -28,7 +28,13 @@ enum class OutputImageFormat {
   rgba
 };
 
-// Classe principale Storage (simplifiée)
+// Byte order enumeration
+enum class ByteOrder {
+  little_endian,
+  big_endian
+};
+
+// Classe principale Storage (avec support root_path)
 class StorageComponent : public Component {
  public:
   StorageComponent() = default;
@@ -41,6 +47,7 @@ class StorageComponent : public Component {
   // Configuration
   void set_platform(const std::string &platform) { this->platform_ = platform; }
   void set_sd_component(sd_mmc_card::SdMmc *sd_component) { this->sd_component_ = sd_component; }
+  void set_root_path(const std::string &root_path) { this->root_path_ = root_path; }  // Added
   
   // Méthodes de fichier
   bool file_exists_direct(const std::string &path);
@@ -50,12 +57,13 @@ class StorageComponent : public Component {
   
   // Getters
   const std::string &get_platform() const { return this->platform_; }
+  const std::string &get_root_path() const { return this->root_path_; }  // Added
   sd_mmc_card::SdMmc *get_sd_component() const { return this->sd_component_; }
   
  private:
   std::string platform_;
+  std::string root_path_{"/"}; // Added with default value
   sd_mmc_card::SdMmc *sd_component_{nullptr};
-  
 };
 
 // FIXED: Inherit from display::BaseImage correctly
@@ -72,6 +80,7 @@ class SdImageComponent : public Component, public display::BaseImage {
   void set_file_path(const std::string &path) { this->file_path_ = path; }
   void set_output_format(OutputImageFormat format) { this->output_format_ = format; }
   void set_output_format_string(const std::string &format);
+  void set_byte_order_string(const std::string &byte_order);  // Added
   void set_storage_component(StorageComponent *storage) { this->storage_component_ = storage; }
   
   // Getters
@@ -79,6 +88,7 @@ class SdImageComponent : public Component, public display::BaseImage {
   int get_width() const override { return this->width_; }
   int get_height() const override { return this->height_; }
   OutputImageFormat get_output_format() const { return this->output_format_; }
+  ByteOrder get_byte_order() const { return this->byte_order_; }  // Added
   bool is_loaded() const { return this->is_loaded_; }
   
   // Méthodes héritées de display::BaseImage
@@ -107,6 +117,7 @@ class SdImageComponent : public Component, public display::BaseImage {
   // Méthodes utilitaires
   bool validate_image_data() const;
   std::string get_output_format_string() const;
+  std::string get_byte_order_string() const;  // Added
   
   // Compatibilité affichage
   void get_image_dimensions(int *width, int *height) const {
@@ -140,6 +151,7 @@ class SdImageComponent : public Component, public display::BaseImage {
   int width_{0};
   int height_{0};
   OutputImageFormat output_format_{OutputImageFormat::rgb565};
+  ByteOrder byte_order_{ByteOrder::little_endian};  // Added
   
   // État
   bool is_loaded_{false};
@@ -246,5 +258,4 @@ class SdImageUnloadAction : public Action<Ts...> {
 
 }  // namespace storage
 }  // namespace esphome
-
 
