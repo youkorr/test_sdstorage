@@ -4,6 +4,9 @@
 #include "esphome/components/display/display.h"
 #include <sys/stat.h>
 #include <dirent.h>
+#include <cstdio>
+#include <cstring>
+#include <algorithm>
 
 namespace esphome {
 namespace storage {
