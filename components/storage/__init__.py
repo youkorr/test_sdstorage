@@ -6,6 +6,7 @@ from pathlib import Path
 import esphome.codegen as cg
 import esphome.config_validation as cv
 from esphome.components import display, image
+from esphome import automation
 from esphome.const import (
     CONF_FILE,
     CONF_ID,
@@ -52,9 +53,9 @@ BYTE_ORDERS = {
     "BIG_ENDIAN": ByteOrder.big_endian,
 }
 
-# Actions - Fix: Use cg.Parented instead of cg.Action
-SdImageLoadAction = storage_ns.class_("SdImageLoadAction", cg.Parented.template(SdImageComponent))
-SdImageUnloadAction = storage_ns.class_("SdImageUnloadAction", cg.Parented.template(SdImageComponent))
+# Actions - Using standard ESPHome automation framework
+SdImageLoadAction = storage_ns.class_("SdImageLoadAction", automation.Action)
+SdImageUnloadAction = storage_ns.class_("SdImageUnloadAction", automation.Action)
 
 # Schema pour SdImageComponent
 SD_IMAGE_SCHEMA = cv.Schema(
@@ -78,25 +79,29 @@ CONFIG_SCHEMA = cv.Schema(
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
-# Actions pour charger/décharger des images
-@cg.register_action("sd_image.load", SdImageLoadAction, cv.Schema({
+# Actions pour charger/décharger des images - Standard ESPHome approach
+LOAD_ACTION_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.use_id(SdImageComponent),
     cv.Optional(CONF_FILE_PATH): cv.templatable(cv.string),
-}))
+})
+
+UNLOAD_ACTION_SCHEMA = cv.Schema({
+    cv.GenerateID(): cv.use_id(SdImageComponent),
+})
+
 async def sd_image_load_action_to_code(config, action_id, template_arg, args):
     """Action pour charger une image depuis la SD"""
-    var = cg.new_Pvariable(action_id, template_arg)
+    parent = await cg.get_variable(config[CONF_ID])
+    var = cg.new_Pvariable(action_id, template_arg, parent)
     if CONF_FILE_PATH in config:
         template_ = await cg.templatable(config[CONF_FILE_PATH], args, cg.std_string)
         cg.add(var.set_file_path(template_))
     return var
 
-@cg.register_action("sd_image.unload", SdImageUnloadAction, cv.Schema({
-    cv.GenerateID(): cv.use_id(SdImageComponent),
-}))
 async def sd_image_unload_action_to_code(config, action_id, template_arg, args):
     """Action pour décharger une image"""
-    var = cg.new_Pvariable(action_id, template_arg)
+    parent = await cg.get_variable(config[CONF_ID])
+    var = cg.new_Pvariable(action_id, template_arg, parent)
     return var
 
 async def to_code(config):
