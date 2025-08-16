@@ -396,6 +396,9 @@ bool SdImageComponent::load_raw_data(const std::vector<uint8_t> &raw_data) {
     this->convert_byte_order();
   }
   
+  return true;
+}
+
 void SdImageComponent::unload_image() {
   ESP_LOGD(TAG_IMAGE, "Unloading image");
   
