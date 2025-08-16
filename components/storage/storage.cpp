@@ -364,7 +364,6 @@ bool SdImageComponent::decode_png(const std::vector<uint8_t> &png_data) {
   
   return true;
 }
-
 bool SdImageComponent::load_raw_data(const std::vector<uint8_t> &raw_data) {
   ESP_LOGI(TAG_IMAGE, "Loading raw bitmap data (%zu bytes)", raw_data.size());
   
