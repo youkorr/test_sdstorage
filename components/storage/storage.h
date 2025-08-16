@@ -47,7 +47,7 @@ class StorageComponent : public Component {
   // Configuration
   void set_platform(const std::string &platform) { this->platform_ = platform; }
   void set_sd_component(sd_mmc_card::SdMmc *sd_component) { this->sd_component_ = sd_component; }
-  void set_root_path(const std::string &root_path) { this->root_path_ = root_path; }  // Added
+  void set_root_path(const std::string &root_path) { this->root_path_ = root_path; }
   
   // Méthodes de fichier
   bool file_exists_direct(const std::string &path);
@@ -57,7 +57,7 @@ class StorageComponent : public Component {
   
   // Getters
   const std::string &get_platform() const { return this->platform_; }
-  const std::string &get_root_path() const { return this->root_path_; }  // Added
+  const std::string &get_root_path() const { return this->root_path_; }
   sd_mmc_card::SdMmc *get_sd_component() const { return this->sd_component_; }
   
  private:
@@ -80,7 +80,7 @@ class SdImageComponent : public Component, public display::BaseImage {
   void set_file_path(const std::string &path) { this->file_path_ = path; }
   void set_output_format(OutputImageFormat format) { this->output_format_ = format; }
   void set_output_format_string(const std::string &format);
-  void set_byte_order_string(const std::string &byte_order);  // Added
+  void set_byte_order_string(const std::string &byte_order);
   void set_storage_component(StorageComponent *storage) { this->storage_component_ = storage; }
   
   // Getters
@@ -88,7 +88,7 @@ class SdImageComponent : public Component, public display::BaseImage {
   int get_width() const override { return this->width_; }
   int get_height() const override { return this->height_; }
   OutputImageFormat get_output_format() const { return this->output_format_; }
-  ByteOrder get_byte_order() const { return this->byte_order_; }  // Added
+  ByteOrder get_byte_order() const { return this->byte_order_; }
   bool is_loaded() const { return this->is_loaded_; }
   
   // Méthodes héritées de display::BaseImage
@@ -117,7 +117,7 @@ class SdImageComponent : public Component, public display::BaseImage {
   // Méthodes utilitaires
   bool validate_image_data() const;
   std::string get_output_format_string() const;
-  std::string get_byte_order_string() const;  // Added
+  std::string get_byte_order_string() const;
   
   // Compatibilité affichage
   void get_image_dimensions(int *width, int *height) const {
@@ -151,10 +151,7 @@ class SdImageComponent : public Component, public display::BaseImage {
   int width_{0};
   int height_{0};
   OutputImageFormat output_format_{OutputImageFormat::rgb565};
-  ByteOrder byte_order_{ByteOrder::little_endian};  // Added
-
-  bool load_raw_data(const std::vector<uint8_t> &raw_data);
-  size_t calculate_output_size() const;
+  ByteOrder byte_order_{ByteOrder::little_endian};
   
   // État
   bool is_loaded_{false};
@@ -166,6 +163,7 @@ class SdImageComponent : public Component, public display::BaseImage {
   bool is_png_file(const std::vector<uint8_t> &data) const;
   bool decode_jpeg(const std::vector<uint8_t> &jpeg_data);
   bool decode_png(const std::vector<uint8_t> &png_data);
+  bool load_raw_data(const std::vector<uint8_t> &raw_data);
   
   // Méthodes privées pour l'extraction de métadonnées
   bool extract_jpeg_dimensions(const std::vector<uint8_t> &data, int &width, int &height) const;
@@ -176,6 +174,9 @@ class SdImageComponent : public Component, public display::BaseImage {
                            uint8_t &red, uint8_t &green, uint8_t &blue, uint8_t &alpha) const;
   size_t get_pixel_size() const;
   size_t get_pixel_offset(int x, int y) const;
+  void convert_byte_order();
+  size_t calculate_output_size() const;
+  void generate_test_pattern(const std::vector<uint8_t> &source_data);
   
   bool validate_dimensions() const;
   bool validate_file_path() const;
