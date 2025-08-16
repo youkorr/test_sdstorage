@@ -114,7 +114,7 @@ SD_IMAGE_SCHEMA = cv.All(SD_IMAGE_SCHEMA, validate_image_config)
 async def to_code(config):
     # Ajout des defines pour ESP32-P4
     cg.add_platformio_option("lib_deps", ["https://github.com/espressif/esp-idf.git"])
-    cg.add_define("CONFIG_IDF_TARGET_ESP32P4")
+    
     
     # Création du composant principal
     var = cg.new_Pvariable(config[CONF_ID])
