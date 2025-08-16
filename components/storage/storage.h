@@ -18,6 +18,9 @@ namespace storage {
 // Forward declarations
 class StorageComponent;
 
+// Utiliser l'enum ImageType de ESPHome
+using ImageType = image::ImageType;
+
 // Énumérations pour les formats d'image (JPEG/PNG uniquement)
 enum class OutputImageFormat {
   rgb565,
@@ -79,8 +82,6 @@ class SdImageComponent : public Component, public image::Image {
   void set_output_format_string(const std::string &format);
   void set_byte_order_string(const std::string &byte_order);
   void set_storage_component(StorageComponent *storage) { this->storage_component_ = storage; }
-  void set_image_type(const std::string &type) { /* Compatibility method */ }
-  void set_resize(int width, int height) { this->width_ = width; this->height_ = height; }
   
   // Getters
   const std::string &get_file_path() const { return this->file_path_; }
@@ -90,29 +91,17 @@ class SdImageComponent : public Component, public image::Image {
   ByteOrder get_byte_order() const { return this->byte_order_; }
   bool is_loaded() const { return this->is_loaded_; }
   
-  // MÉTHODES OBLIGATOIRES pour image::Image - Fix: Remove override for non-virtual methods
+  // MÉTHODES OBLIGATOIRES pour image::Image (interface LVGL)
   void draw(int x, int y, display::Display *display, Color color_on, Color color_off) override;
+  ImageType get_image_type() const override;
   
-  // NOUVELLES MÉTHODES NÉCESSAIRES pour la compatibilité LVGL - Fix signatures
-  const uint8_t *get_data_start() const { 
+  // NOUVELLES MÉTHODES NÉCESSAIRES pour la compatibilité LVGL
+  const uint8_t *get_data_start() const override { 
     return this->image_data_.empty() ? nullptr : this->image_data_.data(); 
   }
   
-  size_t get_data_length() const { 
+  size_t get_data_length() const override { 
     return this->image_data_.size(); 
-  }
-  
-  // Return image type compatible with ESPHome image system
-  image::ImageType get_type() const override {
-    switch (this->output_format_) {
-      case OutputImageFormat::rgb565:
-        return image::IMAGE_TYPE_RGB565;
-      case OutputImageFormat::rgb888:
-      case OutputImageFormat::rgba:
-        return image::IMAGE_TYPE_RGB;
-      default:
-        return image::IMAGE_TYPE_RGB565;
-    }
   }
   
   // Compatibilité avec l'ancienne API si nécessaire
