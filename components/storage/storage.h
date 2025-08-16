@@ -8,7 +8,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/automation.h"
 #include "esphome/core/optional.h"
-#include "esphome/components/image/image.h"
+#include "esphome/components/image/image.h"  // IMPORTANT: Pour image::Image
 #include "esphome/components/display/display.h"
 #include "../sd_mmc_card/sd_mmc_card.h"
 
@@ -66,8 +66,8 @@ class StorageComponent : public Component {
   sd_mmc_card::SdMmc *sd_component_{nullptr};
 };
 
-// FIXED: Inherit from display::BaseImage correctly
-class SdImageComponent : public Component, public display::BaseImage {
+// CORRECTION MAJEURE: Hériter de image::Image au lieu de display::BaseImage
+class SdImageComponent : public Component, public image::Image {
  public:
   SdImageComponent() = default;
 
@@ -91,14 +91,26 @@ class SdImageComponent : public Component, public display::BaseImage {
   ByteOrder get_byte_order() const { return this->byte_order_; }
   bool is_loaded() const { return this->is_loaded_; }
   
-  // Méthodes héritées de display::BaseImage
+  // MÉTHODES OBLIGATOIRES pour image::Image (interface LVGL)
   void draw(int x, int y, display::Display *display, Color color_on, Color color_off) override;
+  ImageType get_image_type() const override;
   
-  // Accès aux données image
-  const uint8_t *get_data_start() const { 
+  // NOUVELLES MÉTHODES NÉCESSAIRES pour la compatibilité LVGL
+  const uint8_t *get_data_start() const override { 
     return this->image_data_.empty() ? nullptr : this->image_data_.data(); 
   }
-  ImageType get_image_type() const;
+  
+  size_t get_data_length() const override { 
+    return this->image_data_.size(); 
+  }
+  
+  // Compatibilité avec l'ancienne API si nécessaire
+  const uint8_t *get_data() const { 
+    return this->get_data_start(); 
+  }
+  size_t get_data_size() const { 
+    return this->get_data_length(); 
+  }
   
   // Chargement/déchargement d'image (simplifié)
   bool load_image();
@@ -109,10 +121,6 @@ class SdImageComponent : public Component, public display::BaseImage {
   // Accès aux pixels avec vérifications de sécurité
   void get_pixel(int x, int y, uint8_t &red, uint8_t &green, uint8_t &blue) const;
   void get_pixel(int x, int y, uint8_t &red, uint8_t &green, uint8_t &blue, uint8_t &alpha) const; 
-  const uint8_t *get_data() const { 
-    return this->image_data_.empty() ? nullptr : this->image_data_.data(); 
-  }
-  size_t get_data_size() const { return this->image_data_.size(); }
   
   // Méthodes utilitaires
   bool validate_image_data() const;
@@ -145,7 +153,7 @@ class SdImageComponent : public Component, public display::BaseImage {
     return std::string(buffer);
   }
 
- private:
+ protected:
   // Configuration
   std::string file_path_;
   int width_{0};
@@ -158,6 +166,7 @@ class SdImageComponent : public Component, public display::BaseImage {
   std::vector<uint8_t> image_data_;
   StorageComponent *storage_component_{nullptr};
   
+ private:
   // Méthodes de décodage d'images (JPEG/PNG uniquement)
   bool is_jpeg_file(const std::vector<uint8_t> &data) const;
   bool is_png_file(const std::vector<uint8_t> &data) const;
@@ -204,26 +213,21 @@ class SdImageLoadAction : public Action<Ts...> {
       return;
     }
     
-    try {
-      if (this->file_path_.has_value()) {
-        std::string path = this->file_path_.value(x...);
-        if (!path.empty()) {
-          ESP_LOGD("sd_image.load", "Loading image from path: %s", path.c_str());
-          if (!this->parent_->load_image_from_path(path)) {
-            ESP_LOGE("sd_image.load", "Failed to load image from: %s", path.c_str());
-          }
-          return;
+    // Supprimé try-catch pour éviter les erreurs de compilation avec -fno-exceptions
+    if (this->file_path_.has_value()) {
+      std::string path = this->file_path_.value(x...);
+      if (!path.empty()) {
+        ESP_LOGD("sd_image.load", "Loading image from path: %s", path.c_str());
+        if (!this->parent_->load_image_from_path(path)) {
+          ESP_LOGE("sd_image.load", "Failed to load image from: %s", path.c_str());
         }
+        return;
       }
-      
-      ESP_LOGD("sd_image.load", "Loading image from configured path");
-      if (!this->parent_->load_image()) {
-        ESP_LOGE("sd_image.load", "Failed to load image from configured path");
-      }
-    } catch (const std::exception& e) {
-      ESP_LOGE("sd_image.load", "Exception during image loading: %s", e.what());
-    } catch (...) {
-      ESP_LOGE("sd_image.load", "Unknown exception during image loading");
+    }
+    
+    ESP_LOGD("sd_image.load", "Loading image from configured path");
+    if (!this->parent_->load_image()) {
+      ESP_LOGE("sd_image.load", "Failed to load image from configured path");
     }
   }
 
@@ -245,15 +249,10 @@ class SdImageUnloadAction : public Action<Ts...> {
       return;
     }
     
-    try {
-      ESP_LOGD("sd_image.unload", "Unloading image: %s", this->parent_->get_debug_info().c_str());
-      this->parent_->unload_image();
-      ESP_LOGD("sd_image.unload", "Image unloaded successfully");
-    } catch (const std::exception& e) {
-      ESP_LOGE("sd_image.unload", "Exception during image unloading: %s", e.what());
-    } catch (...) {
-      ESP_LOGE("sd_image.unload", "Unknown exception during image unloading");
-    }
+    // Supprimé try-catch pour éviter les erreurs de compilation avec -fno-exceptions
+    ESP_LOGD("sd_image.unload", "Unloading image: %s", this->parent_->get_debug_info().c_str());
+    this->parent_->unload_image();
+    ESP_LOGD("sd_image.unload", "Image unloaded successfully");
   }
 
  private:
@@ -262,4 +261,3 @@ class SdImageUnloadAction : public Action<Ts...> {
 
 }  // namespace storage
 }  // namespace esphome
-
