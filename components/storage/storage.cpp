@@ -364,6 +364,7 @@ bool SdImageComponent::decode_png(const std::vector<uint8_t> &png_data) {
   
   return true;
 }
+
 bool SdImageComponent::load_raw_data(const std::vector<uint8_t> &raw_data) {
   ESP_LOGI(TAG_IMAGE, "Loading raw bitmap data (%zu bytes)", raw_data.size());
   
@@ -473,7 +474,7 @@ void SdImageComponent::draw(int x, int y, display::Display *display, Color color
   ESP_LOGD(TAG_IMAGE, "Draw completed: %d pixels drawn, %d skipped", pixels_drawn, pixels_skipped);
 }
 
-ImageType SdImageComponent::get_image_type() const {
+image::ImageType SdImageComponent::get_image_type() const {
   switch (this->output_format_) {
     case OutputImageFormat::rgb565:
       return image::IMAGE_TYPE_RGB565;
