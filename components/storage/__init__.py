@@ -57,7 +57,7 @@ BYTE_ORDERS = {
 SdImageLoadAction = storage_ns.class_("SdImageLoadAction", automation.Action)
 SdImageUnloadAction = storage_ns.class_("SdImageUnloadAction", automation.Action)
 
-# Schema pour SdImageComponent
+# Schema pour SdImageComponent - Compatible avec le système image ESPHome
 SD_IMAGE_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(SdImageComponent),
@@ -65,6 +65,11 @@ SD_IMAGE_SCHEMA = cv.Schema(
         cv.Optional(CONF_OUTPUT_FORMAT, default="rgb565"): cv.enum(OUTPUT_IMAGE_FORMATS, upper=True),
         cv.Optional(CONF_BYTE_ORDER, default="little_endian"): cv.enum(BYTE_ORDERS, upper=True),
         cv.Optional(CONF_RESIZE): cv.dimensions,
+        # Ajouter le type pour la compatibilité avec LVGL et autres composants
+        cv.Optional(CONF_TYPE, default="SD_IMAGE"): cv.string,
+        # Ajouter les options standard des images pour la compatibilité
+        cv.Optional(image.CONF_TRANSPARENCY, default=image.CONF_OPAQUE): image.validate_transparency(),
+        cv.Optional(image.CONF_DITHER, default="FLOYDSTEINBERG"): image.validate_dither(),
     }
 )
 
@@ -79,7 +84,7 @@ CONFIG_SCHEMA = cv.Schema(
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
-# Actions pour charger/décharger des images - Standard ESPHome approach
+# Actions pour charger/décharger des images - Using automation.register_action
 LOAD_ACTION_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.use_id(SdImageComponent),
     cv.Optional(CONF_FILE_PATH): cv.templatable(cv.string),
@@ -103,6 +108,19 @@ async def sd_image_unload_action_to_code(config, action_id, template_arg, args):
     parent = await cg.get_variable(config[CONF_ID])
     var = cg.new_Pvariable(action_id, template_arg, parent)
     return var
+
+# Enregistrer les actions
+automation.register_action(
+    "sd_image.load", 
+    SdImageLoadAction, 
+    LOAD_ACTION_SCHEMA
+)(sd_image_load_action_to_code)
+
+automation.register_action(
+    "sd_image.unload", 
+    SdImageUnloadAction, 
+    UNLOAD_ACTION_SCHEMA
+)(sd_image_unload_action_to_code)
 
 async def to_code(config):
     """Génère le code C++ pour le composant storage"""
@@ -137,8 +155,18 @@ async def setup_sd_image_component(config, parent_storage):
     cg.add(var.set_output_format_string(config[CONF_OUTPUT_FORMAT]))
     cg.add(var.set_byte_order_string(config[CONF_BYTE_ORDER]))
     
+    # Définir le type pour la compatibilité
+    cg.add(var.set_image_type(config[CONF_TYPE]))
+    
     if CONF_RESIZE in config:
         cg.add(var.set_resize(config[CONF_RESIZE][0], config[CONF_RESIZE][1]))
+    
+    # Configuration des propriétés image standard
+    if image.CONF_TRANSPARENCY in config:
+        cg.add(var.set_transparency(config[image.CONF_TRANSPARENCY]))
+    
+    if image.CONF_DITHER in config:
+        cg.add(var.set_dither(config[image.CONF_DITHER]))
     
     return var
 
@@ -176,6 +204,15 @@ def register_sd_image_type():
     # Ajouter à la liste des types d'images disponibles
     if hasattr(image, 'IMAGE_TYPE'):
         image.IMAGE_TYPE["SD_IMAGE"] = SdImageEncoder
+    
+    # Ajouter aussi aux formats d'image reconnus pour la compatibilité LVGL
+    if hasattr(image, 'IMAGE_TYPE_SCHEMA'):
+        # Étendre le schéma des types d'images
+        image.IMAGE_TYPE_SCHEMA = cv.one_of(
+            *list(image.IMAGE_TYPE_SCHEMA.validators), 
+            "SD_IMAGE", 
+            upper=True
+        )
 
 # Intégration avec le système d'images ESPHome
 def validate_sd_image(value):
