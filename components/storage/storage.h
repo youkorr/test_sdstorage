@@ -66,7 +66,7 @@ class StorageComponent : public Component {
   sd_mmc_card::SdMmc *sd_component_{nullptr};
 };
 
-// CORRECTION MAJEURE: Hériter de image::Image au lieu de display::BaseImage
+// CORRECTION : Hériter de image::Image au lieu de display::BaseImage
 class SdImageComponent : public Component, public image::Image {
  public:
   SdImageComponent() = default;
@@ -93,14 +93,18 @@ class SdImageComponent : public Component, public image::Image {
   
   // MÉTHODES OBLIGATOIRES pour image::Image (interface LVGL)
   void draw(int x, int y, display::Display *display, Color color_on, Color color_off) override;
-  ImageType get_image_type() const override;
+
+  // Correction : correspond à image::Image::get_type()
+  ImageType get_type() const override {
+    return IMAGE_TYPE_RGB565;  // ou autre selon format détecté
+  }
   
-  // NOUVELLES MÉTHODES NÉCESSAIRES pour la compatibilité LVGL
-  const uint8_t *get_data_start() const override { 
+  // Pas de override ici (non virtuelles dans la classe de base)
+  const uint8_t *get_data_start() const { 
     return this->image_data_.empty() ? nullptr : this->image_data_.data(); 
   }
   
-  size_t get_data_length() const override { 
+  size_t get_data_length() const { 
     return this->image_data_.size(); 
   }
   
