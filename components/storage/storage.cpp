@@ -439,36 +439,30 @@ void SdImageComponent::draw(int x, int y, display::Display *display, Color color
     return;
   }
 
-  // Dessiner avec gestion d'erreurs robuste
+  // Dessiner avec gestion d'erreurs robuste sans exceptions
   int pixels_drawn = 0;
   int pixels_skipped = 0;
   
   for (int img_y = 0; img_y < this->height_; img_y++) {
     for (int img_x = 0; img_x < this->width_; img_x++) {
-      try {
-        uint8_t red, green, blue, alpha = 255;
-        
-        // get_pixel avec vérifications intégrées
-        this->get_pixel(img_x, img_y, red, green, blue, alpha);
-        
-        // Skip transparent pixels
-        if (alpha == 0) {
-          pixels_skipped++;
-          continue;
-        }
-
-        Color pixel_color(red, green, blue);
-        int screen_x = x + img_x;
-        int screen_y = y + img_y;
-        
-        // Vérifier les limites de l'écran si possible
-        display->draw_pixel_at(screen_x, screen_y, pixel_color);
-        pixels_drawn++;
-        
-      } catch (...) {
-        ESP_LOGE(TAG_IMAGE, "Exception drawing pixel at (%d,%d)", img_x, img_y);
+      uint8_t red, green, blue, alpha = 255;
+      
+      // get_pixel avec vérifications intégrées
+      this->get_pixel(img_x, img_y, red, green, blue, alpha);
+      
+      // Skip transparent pixels
+      if (alpha == 0) {
         pixels_skipped++;
+        continue;
       }
+
+      Color pixel_color(red, green, blue);
+      int screen_x = x + img_x;
+      int screen_y = y + img_y;
+      
+      // Vérifier les limites de l'écran si possible
+      display->draw_pixel_at(screen_x, screen_y, pixel_color);
+      pixels_drawn++;
     }
     
     // Yield périodiquement pour éviter les watchdog timeouts
