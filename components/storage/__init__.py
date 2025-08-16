@@ -67,9 +67,8 @@ SD_IMAGE_SCHEMA = cv.Schema(
         cv.Optional(CONF_RESIZE): cv.dimensions,
         # Ajouter le type pour la compatibilité avec LVGL et autres composants
         cv.Optional(CONF_TYPE, default="SD_IMAGE"): cv.string,
-        # Ajouter les options standard des images pour la compatibilité
+        # Ajouter les options standard des images pour la compatibilité (simplifiées)
         cv.Optional(image.CONF_TRANSPARENCY, default=image.CONF_OPAQUE): image.validate_transparency(),
-        cv.Optional(image.CONF_DITHER, default="FLOYDSTEINBERG"): image.validate_dither(),
     }
 )
 
@@ -164,9 +163,6 @@ async def setup_sd_image_component(config, parent_storage):
     # Configuration des propriétés image standard
     if image.CONF_TRANSPARENCY in config:
         cg.add(var.set_transparency(config[image.CONF_TRANSPARENCY]))
-    
-    if image.CONF_DITHER in config:
-        cg.add(var.set_dither(config[image.CONF_DITHER]))
     
     return var
 
