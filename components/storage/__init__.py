@@ -57,18 +57,15 @@ BYTE_ORDERS = {
 SdImageLoadAction = storage_ns.class_("SdImageLoadAction", automation.Action)
 SdImageUnloadAction = storage_ns.class_("SdImageUnloadAction", automation.Action)
 
-# Schema pour SdImageComponent - Compatible avec le système image ESPHome
+# Schema pour SdImageComponent - Simplifié pour éviter les erreurs d'attributs
 SD_IMAGE_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(SdImageComponent),
-        cv.Required(CONF_FILE_PATH): cv.string,  # file_path au lieu de file
+        cv.Required(CONF_FILE_PATH): cv.string,
         cv.Optional(CONF_OUTPUT_FORMAT, default="rgb565"): cv.enum(OUTPUT_IMAGE_FORMATS, upper=True),
         cv.Optional(CONF_BYTE_ORDER, default="little_endian"): cv.enum(BYTE_ORDERS, upper=True),
         cv.Optional(CONF_RESIZE): cv.dimensions,
-        # Ajouter le type pour la compatibilité avec LVGL et autres composants
         cv.Optional(CONF_TYPE, default="SD_IMAGE"): cv.string,
-        # Ajouter les options standard des images pour la compatibilité (simplifiées)
-        cv.Optional(image.CONF_TRANSPARENCY, default=image.CONF_OPAQUE): image.validate_transparency(),
     }
 )
 
@@ -159,10 +156,6 @@ async def setup_sd_image_component(config, parent_storage):
     
     if CONF_RESIZE in config:
         cg.add(var.set_resize(config[CONF_RESIZE][0], config[CONF_RESIZE][1]))
-    
-    # Configuration des propriétés image standard
-    if image.CONF_TRANSPARENCY in config:
-        cg.add(var.set_transparency(config[image.CONF_TRANSPARENCY]))
     
     return var
 
