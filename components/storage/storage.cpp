@@ -479,9 +479,9 @@ ImageType SdImageComponent::get_image_type() const {
     case OutputImageFormat::rgb565:
       return image::IMAGE_TYPE_RGB565;
     case OutputImageFormat::rgb888:
-      return image::IMAGE_TYPE_RGB24;
+      return image::IMAGE_TYPE_RGB;
     case OutputImageFormat::rgba:
-      return image::IMAGE_TYPE_RGBA;
+      return image::IMAGE_TYPE_RGB;
     default:
       return image::IMAGE_TYPE_RGB565;
   }
