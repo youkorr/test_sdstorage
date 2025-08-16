@@ -152,6 +152,9 @@ class SdImageComponent : public Component, public display::BaseImage {
   int height_{0};
   OutputImageFormat output_format_{OutputImageFormat::rgb565};
   ByteOrder byte_order_{ByteOrder::little_endian};  // Added
+
+  bool load_raw_data(const std::vector<uint8_t> &raw_data);
+  size_t calculate_output_size() const;
   
   // État
   bool is_loaded_{false};
