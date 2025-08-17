@@ -66,10 +66,11 @@ class StorageComponent : public Component {
   sd_mmc_card::SdMmc *sd_component_{nullptr};
 };
 
-// CORRECTION: Hériter de image::Image sans override des méthodes inexistantes
+// CORRECTION: Hériter de image::Image avec constructeur approprié
 class SdImageComponent : public Component, public image::Image {
  public:
-  SdImageComponent() = default;
+  // Constructeur avec paramètres requis pour image::Image
+  SdImageComponent() : image::Image(nullptr, 0, 0, image::IMAGE_TYPE_RGB565, image::TRANSPARENCY_OPAQUE) {}
 
   void setup() override;
   void loop() override {}
@@ -82,6 +83,10 @@ class SdImageComponent : public Component, public image::Image {
   void set_output_format_string(const std::string &format);
   void set_byte_order_string(const std::string &byte_order);
   void set_storage_component(StorageComponent *storage) { this->storage_component_ = storage; }
+  
+  // Setters pour les dimensions (nécessaire pour les données raw)
+  void set_width(int width) { this->width_ = width; }
+  void set_height(int height) { this->height_ = height; }
   
   // Getters
   const std::string &get_file_path() const { return this->file_path_; }
