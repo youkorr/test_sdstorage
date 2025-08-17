@@ -66,7 +66,7 @@ class StorageComponent : public Component {
   sd_mmc_card::SdMmc *sd_component_{nullptr};
 };
 
-// CORRECTION MAJEURE: Hériter de image::Image au lieu de display::BaseImage
+// CORRECTION: Hériter de image::Image sans override des méthodes inexistantes
 class SdImageComponent : public Component, public image::Image {
  public:
   SdImageComponent() = default;
@@ -91,16 +91,24 @@ class SdImageComponent : public Component, public image::Image {
   ByteOrder get_byte_order() const { return this->byte_order_; }
   bool is_loaded() const { return this->is_loaded_; }
   
-  // MÉTHODES OBLIGATOIRES pour image::Image (interface LVGL)
+  // MÉTHODES OBLIGATOIRES pour image::Image - draw() uniquement si elle existe dans la base
   void draw(int x, int y, display::Display *display, Color color_on, Color color_off) override;
-  ImageType get_image_type() const override;
   
-  // NOUVELLES MÉTHODES NÉCESSAIRES pour la compatibilité LVGL
-  const uint8_t *get_data_start() const override { 
+  // SUPPRIMÉ les override qui n'existent pas dans la classe de base
+  // ImageType get_image_type() const override;  // SUPPRIMÉ
+  // const uint8_t *get_data_start() const override;  // SUPPRIMÉ 
+  // size_t get_data_length() const override;  // SUPPRIMÉ
+  
+  // NOUVELLES MÉTHODES SANS override (non virtuelles dans la base)
+  ImageType get_image_type() const { 
+    return ImageType::IMAGE_TYPE_RGB565; // ou selon votre format
+  }
+  
+  const uint8_t *get_data_start() const { 
     return this->image_data_.empty() ? nullptr : this->image_data_.data(); 
   }
   
-  size_t get_data_length() const override { 
+  size_t get_data_length() const { 
     return this->image_data_.size(); 
   }
   
