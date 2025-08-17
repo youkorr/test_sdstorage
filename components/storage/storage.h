@@ -94,15 +94,8 @@ class SdImageComponent : public Component, public image::Image {
   // MÉTHODES OBLIGATOIRES pour image::Image - draw() uniquement si elle existe dans la base
   void draw(int x, int y, display::Display *display, Color color_on, Color color_off) override;
   
-  // SUPPRIMÉ les override qui n'existent pas dans la classe de base
-  // ImageType get_image_type() const override;  // SUPPRIMÉ
-  // const uint8_t *get_data_start() const override;  // SUPPRIMÉ 
-  // size_t get_data_length() const override;  // SUPPRIMÉ
-  
-  // NOUVELLES MÉTHODES SANS override (non virtuelles dans la base)
-  ImageType get_image_type() const { 
-    return ImageType::IMAGE_TYPE_RGB565; // ou selon votre format
-  }
+  // MÉTHODES SANS override (déclarées ici, implémentées dans le .cpp)
+  image::ImageType get_image_type() const;
   
   const uint8_t *get_data_start() const { 
     return this->image_data_.empty() ? nullptr : this->image_data_.data(); 
