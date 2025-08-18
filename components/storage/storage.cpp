@@ -427,9 +427,19 @@ bool SdImageComponent::reload_image() {
 }
 
 void SdImageComponent::draw(int x, int y, display::Display *display, Color color_on, Color color_off) {
-  if (!this->is_loaded_ || this->image_data_.empty()) {
-    ESP_LOGD(TAG_IMAGE, "Cannot draw: image not loaded");
+  if (!this->is_loaded_) {
+    ESP_LOGE(TAG_IMAGE, "Image not loaded");
     return;
+  }
+
+  ESP_LOGI(TAG_IMAGE, "Drawing image: %dx%d at (%d,%d)", this->width_, this->height_, x, y);
+  
+  // Afficher les premiers pixels pour debug
+  for (int i = 0; i < std::min(10, this->width_); i++) {
+    uint8_t r, g, b;
+    this->get_pixel(i, 0, r, g, b);
+    ESP_LOGD(TAG_IMAGE, "Pixel %d: RGB(%d,%d,%d)", i, r, g, b);
+  }
   }
   
   if (!display) {
