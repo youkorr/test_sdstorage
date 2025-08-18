@@ -331,9 +331,9 @@ bool SdImageComponent::decode_jpeg(const std::vector<uint8_t> &jpeg_data) {
   
   // IMPORTANT: HERE YOU SHOULD USE A REAL JPEG DECODING LIBRARY
   // For now, simulation with realistic pattern
-  //this->generate_test_pattern(jpeg_data);
+  this->generate_test_pattern(jpeg_data);
   // Utiliser une bibliothèque JPEG ici, exemple pseudo-code :
-  decode_jpeg_to_buffer(jpeg_data.data(), jpeg_data.size(), this->image_data_, this->width_, this->height_);
+  
   
   ESP_LOGI(TAG_IMAGE, "JPEG processing complete: %dx%d %s (%zu bytes)", 
            this->width_, this->height_, this->get_output_format_string().c_str(), output_size);
