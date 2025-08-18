@@ -7,7 +7,8 @@
 #include <cstdio>
 #include <cstring>
 #include <algorithm>
-#include "image.h"
+#include "esphome/components/image/image.h"
+
 
 namespace esphome {
 namespace storage {
