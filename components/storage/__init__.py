@@ -39,16 +39,16 @@ CONF_SD_COMPONENT = "sd_component"
 CONF_SD_IMAGES = "sd_images"
 CONF_FILE_PATH = "file_path"
 
-# Enums - FIXED: Proper enum declarations
-OutputImageFormat = storage_ns.enum("OutputImageFormat")
-OUTPUT_IMAGE_FORMATS = {
+# FIXED: Correct ESPHome enum registration
+OutputImageFormat = storage_ns.enum("OutputImageFormat", is_class=True)
+CONF_OUTPUT_IMAGE_FORMATS = {
     "RGB565": OutputImageFormat.rgb565,
     "RGB888": OutputImageFormat.rgb888,
     "RGBA": OutputImageFormat.rgba,
 }
 
-ByteOrder = storage_ns.enum("ByteOrder")
-BYTE_ORDERS = {
+ByteOrder = storage_ns.enum("ByteOrder", is_class=True)  
+CONF_BYTE_ORDERS = {
     "LITTLE_ENDIAN": ByteOrder.little_endian,
     "BIG_ENDIAN": ByteOrder.big_endian,
 }
@@ -57,13 +57,13 @@ BYTE_ORDERS = {
 SdImageLoadAction = storage_ns.class_("SdImageLoadAction", automation.Action)
 SdImageUnloadAction = storage_ns.class_("SdImageUnloadAction", automation.Action)
 
-# Schema pour SdImageComponent - FIXED: Removed problematic set_image_type
+# Schema pour SdImageComponent
 SD_IMAGE_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(SdImageComponent),
         cv.Required(CONF_FILE_PATH): cv.string,
-        cv.Optional(CONF_OUTPUT_FORMAT, default="RGB565"): cv.enum(OUTPUT_IMAGE_FORMATS, upper=True),
-        cv.Optional(CONF_BYTE_ORDER, default="LITTLE_ENDIAN"): cv.enum(BYTE_ORDERS, upper=True),
+        cv.Optional(CONF_OUTPUT_FORMAT, default="RGB565"): cv.enum(CONF_OUTPUT_IMAGE_FORMATS, upper=True),
+        cv.Optional(CONF_BYTE_ORDER, default="LITTLE_ENDIAN"): cv.enum(CONF_BYTE_ORDERS, upper=True),
         cv.Optional(CONF_RESIZE): cv.dimensions,
         cv.Optional(CONF_TYPE, default="SD_IMAGE"): cv.string,
     }
@@ -146,15 +146,10 @@ async def setup_sd_image_component(config, parent_storage):
     # Lier au composant storage parent
     cg.add(var.set_storage_component(parent_storage))
     
-    # Configuration de l'image - FIXED: Use proper enum values
+    # Configuration de l'image - FIXED: Direct string methods to avoid enum issues
     cg.add(var.set_file_path(config[CONF_FILE_PATH]))
-    
-    # FIXED: Pass enum values correctly
-    output_format = OUTPUT_IMAGE_FORMATS[config[CONF_OUTPUT_FORMAT]]
-    cg.add(var.set_output_format(output_format))
-    
-    byte_order = BYTE_ORDERS[config[CONF_BYTE_ORDER]]
-    cg.add(var.set_byte_order(byte_order))
+    cg.add(var.set_output_format_string(config[CONF_OUTPUT_FORMAT]))
+    cg.add(var.set_byte_order_string(config[CONF_BYTE_ORDER]))
     
     if CONF_RESIZE in config:
         cg.add(var.set_resize(config[CONF_RESIZE][0], config[CONF_RESIZE][1]))
@@ -230,14 +225,9 @@ async def image_to_code_hook(config):
             storage = await cg.get_variable(config[CONF_STORAGE_COMPONENT])
             cg.add(var.set_storage_component(storage))
         
-        # FIXED: Use enum values
-        if CONF_OUTPUT_FORMAT in config:
-            output_format = OUTPUT_IMAGE_FORMATS[config[CONF_OUTPUT_FORMAT]]
-            cg.add(var.set_output_format(output_format))
-        
-        if CONF_BYTE_ORDER in config:
-            byte_order = BYTE_ORDERS[config[CONF_BYTE_ORDER]]
-            cg.add(var.set_byte_order(byte_order))
+        # Use string methods instead of enum to avoid compilation issues
+        cg.add(var.set_output_format_string(config.get(CONF_OUTPUT_FORMAT, "RGB565")))
+        cg.add(var.set_byte_order_string(config.get(CONF_BYTE_ORDER, "LITTLE_ENDIAN")))
         
         return var
     
