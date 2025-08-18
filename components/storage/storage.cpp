@@ -825,6 +825,23 @@ bool SdImageComponent::validate_image_data() const {
   size_t expected_size = this->calculate_output_size();
   return this->image_data_.size() == expected_size;
 }
+bool SdImageComponent::decode_jpeg(const std::vector<uint8_t> &jpeg_data) {
+  // On utilise le vrai décodeur si dispo, sinon le fallback
+#ifdef USE_JPEGDEC
+  return this->decode_jpeg_real(jpeg_data);
+#else
+  return this->decode_jpeg_fallback(jpeg_data);
+#endif
+}
+
+bool SdImageComponent::decode_png(const std::vector<uint8_t> &png_data) {
+  // On utilise le vrai décodeur si dispo, sinon le fallback
+#ifdef USE_PNGDEC
+  return this->decode_png_real(png_data);
+#else
+  return this->decode_png_fallback(png_data);
+#endif
+}
 
 }  // namespace storage
 }  // namespace esphome
