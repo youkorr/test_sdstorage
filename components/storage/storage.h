@@ -246,6 +246,12 @@ class SdImageLoadAction : public Action<Ts...> {
 
  private:
   SdImageComponent *parent_{nullptr};
+    // Méthodes manquantes à ajouter dans le .h
+  void generate_jpeg_test_pattern(const std::vector<uint8_t> &source_data);
+  void generate_png_test_pattern(const std::vector<uint8_t> &source_data);
+  void set_pixel_at_offset(size_t offset, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
+  void list_directory_contents(const std::string &dir_path);
+
 };
 
 template<typename... Ts> 
