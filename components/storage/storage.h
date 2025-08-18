@@ -86,6 +86,9 @@ class SdImageComponent : public Component, public image::Image {
   void set_output_format_string(const std::string &format);
   void set_byte_order_string(const std::string &byte_order);
   
+  // REMOVED: set_image_type method that was causing compilation errors
+  // The image type is determined automatically by get_image_type()
+  
   // Setters pour les dimensions
   void set_width(int width) { this->width_ = width; }
   void set_height(int height) { this->height_ = height; }
@@ -178,17 +181,12 @@ class SdImageComponent : public Component, public image::Image {
   StorageComponent *storage_component_{nullptr};
   
  private:
-  // FIXED: Image decoding methods (JPEG/PNG/BMP support)
+  // Image decoding methods (JPEG/PNG only)
   bool is_jpeg_file(const std::vector<uint8_t> &data) const;
   bool is_png_file(const std::vector<uint8_t> &data) const;
   bool decode_jpeg(const std::vector<uint8_t> &jpeg_data);
   bool decode_png(const std::vector<uint8_t> &png_data);
-  bool decode_bmp(const std::vector<uint8_t> &bmp_data);  // ADDED: BMP support
   bool load_raw_data(const std::vector<uint8_t> &raw_data);
-  
-  // FIXED: Added utility methods
-  std::string get_file_extension(const std::string &path) const;
-  void convert_bmp_to_format(const uint8_t* bmp_data, size_t data_size, uint16_t bpp, bool top_down);
   
   // Private methods for metadata extraction
   bool extract_jpeg_dimensions(const std::vector<uint8_t> &data, int &width, int &height) const;
@@ -201,7 +199,7 @@ class SdImageComponent : public Component, public image::Image {
   size_t get_pixel_offset(int x, int y) const;
   void convert_byte_order();
   size_t calculate_output_size() const;
-  void generate_realistic_pattern(const std::vector<uint8_t> &source_data);  // FIXED: Better pattern generation
+  void generate_test_pattern(const std::vector<uint8_t> &source_data);
   
   bool validate_dimensions() const;
   bool validate_file_path() const;
