@@ -8,7 +8,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/automation.h"
 #include "esphome/core/optional.h"
-#include "esphome/components/image/image.h"  // IMPORTANT: Pour image::Image
+#include "esphome/components/image/image.h"
 #include "esphome/components/display/display.h"
 #include "../sd_mmc_card/sd_mmc_card.h"
 
@@ -21,20 +21,19 @@ class StorageComponent;
 // Utiliser l'enum ImageType de ESPHome
 using ImageType = image::ImageType;
 
-// Énumérations pour les formats d'image (JPEG/PNG uniquement)
+// FIXED: Énumérations correctement déclarées avec enum class
 enum class OutputImageFormat {
   rgb565,
   rgb888,
   rgba
 };
 
-// Byte order enumeration
 enum class ByteOrder {
   little_endian,
   big_endian
 };
 
-// Classe principale Storage (avec support root_path)
+// Classe principale Storage
 class StorageComponent : public Component {
  public:
   StorageComponent() = default;
@@ -62,14 +61,14 @@ class StorageComponent : public Component {
   
  private:
   std::string platform_;
-  std::string root_path_{"/"}; // Added with default value
+  std::string root_path_{"/"}; 
   sd_mmc_card::SdMmc *sd_component_{nullptr};
 };
 
-// CORRECTION: Hériter de image::Image avec constructeur approprié
+// FIXED: Correct inheritance and method signatures
 class SdImageComponent : public Component, public image::Image {
  public:
-  // Constructeur avec paramètres requis pour image::Image
+  // FIXED: Proper constructor for image::Image base class
   SdImageComponent() : image::Image(nullptr, 0, 0, image::IMAGE_TYPE_RGB565, image::TRANSPARENCY_OPAQUE) {}
 
   void setup() override;
@@ -77,18 +76,28 @@ class SdImageComponent : public Component, public image::Image {
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::DATA; }
   
-  // Configuration de base
+  // FIXED: Configuration methods with proper enum types
   void set_file_path(const std::string &path) { this->file_path_ = path; }
   void set_output_format(OutputImageFormat format) { this->output_format_ = format; }
-  void set_output_format_string(const std::string &format);
-  void set_byte_order_string(const std::string &byte_order);
+  void set_byte_order(ByteOrder byte_order) { this->byte_order_ = byte_order; }
   void set_storage_component(StorageComponent *storage) { this->storage_component_ = storage; }
   
-  // Setters pour les dimensions (nécessaire pour les données raw)
+  // FIXED: Added missing methods that were referenced in Python
+  void set_output_format_string(const std::string &format);
+  void set_byte_order_string(const std::string &byte_order);
+  
+  // REMOVED: set_image_type method that was causing compilation errors
+  // The image type is determined automatically by get_image_type()
+  
+  // Setters pour les dimensions
   void set_width(int width) { this->width_ = width; }
   void set_height(int height) { this->height_ = height; }
+  void set_resize(int width, int height) { 
+    this->width_ = width; 
+    this->height_ = height; 
+  }
   
-  // Getters
+  // Getters - FIXED: Override where needed
   const std::string &get_file_path() const { return this->file_path_; }
   int get_width() const override { return this->width_; }
   int get_height() const override { return this->height_; }
@@ -96,12 +105,11 @@ class SdImageComponent : public Component, public image::Image {
   ByteOrder get_byte_order() const { return this->byte_order_; }
   bool is_loaded() const { return this->is_loaded_; }
   
-  // MÉTHODES OBLIGATOIRES pour image::Image - draw() uniquement si elle existe dans la base
+  // FIXED: Essential image::Image methods
   void draw(int x, int y, display::Display *display, Color color_on, Color color_off) override;
-  
-  // MÉTHODES SANS override (déclarées ici, implémentées dans le .cpp)
   image::ImageType get_image_type() const;
   
+  // Data access methods
   const uint8_t *get_data_start() const { 
     return this->image_data_.empty() ? nullptr : this->image_data_.data(); 
   }
@@ -110,7 +118,7 @@ class SdImageComponent : public Component, public image::Image {
     return this->image_data_.size(); 
   }
   
-  // Compatibilité avec l'ancienne API si nécessaire
+  // Compatibility methods
   const uint8_t *get_data() const { 
     return this->get_data_start(); 
   }
@@ -118,22 +126,22 @@ class SdImageComponent : public Component, public image::Image {
     return this->get_data_length(); 
   }
   
-  // Chargement/déchargement d'image (simplifié)
+  // Image loading/unloading
   bool load_image();
   bool load_image_from_path(const std::string &path);
   void unload_image();
   bool reload_image();
   
-  // Accès aux pixels avec vérifications de sécurité
+  // Pixel access
   void get_pixel(int x, int y, uint8_t &red, uint8_t &green, uint8_t &blue) const;
   void get_pixel(int x, int y, uint8_t &red, uint8_t &green, uint8_t &blue, uint8_t &alpha) const; 
   
-  // Méthodes utilitaires
+  // Utility methods
   bool validate_image_data() const;
   std::string get_output_format_string() const;
   std::string get_byte_order_string() const;
   
-  // Compatibilité affichage
+  // Display compatibility
   void get_image_dimensions(int *width, int *height) const {
     if (width) *width = this->width_;
     if (height) *height = this->height_;
@@ -141,7 +149,7 @@ class SdImageComponent : public Component, public image::Image {
   
   const uint8_t* get_image_data() const { return this->get_data(); }
 
-  // Méthodes utilitaires pour le diagnostic
+  // Utility methods for diagnostics
   bool has_valid_dimensions() const { 
     return this->width_ > 0 && this->height_ > 0; 
   }
@@ -167,24 +175,24 @@ class SdImageComponent : public Component, public image::Image {
   OutputImageFormat output_format_{OutputImageFormat::rgb565};
   ByteOrder byte_order_{ByteOrder::little_endian};
   
-  // État
+  // State
   bool is_loaded_{false};
   std::vector<uint8_t> image_data_;
   StorageComponent *storage_component_{nullptr};
   
  private:
-  // Méthodes de décodage d'images (JPEG/PNG uniquement)
+  // Image decoding methods (JPEG/PNG only)
   bool is_jpeg_file(const std::vector<uint8_t> &data) const;
   bool is_png_file(const std::vector<uint8_t> &data) const;
   bool decode_jpeg(const std::vector<uint8_t> &jpeg_data);
   bool decode_png(const std::vector<uint8_t> &png_data);
   bool load_raw_data(const std::vector<uint8_t> &raw_data);
   
-  // Méthodes privées pour l'extraction de métadonnées
+  // Private methods for metadata extraction
   bool extract_jpeg_dimensions(const std::vector<uint8_t> &data, int &width, int &height) const;
   bool extract_png_dimensions(const std::vector<uint8_t> &data, int &width, int &height) const;
   
-  // Méthodes de conversion et validation
+  // Conversion and validation methods
   void convert_pixel_format(int x, int y, const uint8_t *pixel_data, 
                            uint8_t &red, uint8_t &green, uint8_t &blue, uint8_t &alpha) const;
   size_t get_pixel_size() const;
@@ -197,12 +205,12 @@ class SdImageComponent : public Component, public image::Image {
   bool validate_file_path() const;
   bool validate_pixel_access(int x, int y) const;
   
-  // Méthodes utilitaires
+  // Utility methods
   std::string detect_file_type(const std::string &path) const;
   bool is_supported_format(const std::string &extension) const;
 };
 
-// Actions pour l'automatisation avec gestion d'erreurs améliorée
+// FIXED: Action classes with proper error handling
 template<typename... Ts> 
 class SdImageLoadAction : public Action<Ts...> {
  public:
@@ -219,7 +227,6 @@ class SdImageLoadAction : public Action<Ts...> {
       return;
     }
     
-    // Supprimé try-catch pour éviter les erreurs de compilation avec -fno-exceptions
     if (this->file_path_.has_value()) {
       std::string path = this->file_path_.value(x...);
       if (!path.empty()) {
@@ -255,7 +262,6 @@ class SdImageUnloadAction : public Action<Ts...> {
       return;
     }
     
-    // Supprimé try-catch pour éviter les erreurs de compilation avec -fno-exceptions
     ESP_LOGD("sd_image.unload", "Unloading image: %s", this->parent_->get_debug_info().c_str());
     this->parent_->unload_image();
     ESP_LOGD("sd_image.unload", "Image unloaded successfully");
