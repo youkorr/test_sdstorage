@@ -12,6 +12,12 @@
 #include "esphome/components/display/display.h"
 #include "../sd_mmc_card/sd_mmc_card.h"
 
+// Décodeurs d'images
+#include <JPEGDEC.h>
+extern "C" {
+  #include <upng.h>
+}
+
 namespace esphome {
 namespace storage {
 
@@ -68,7 +74,7 @@ class StorageComponent : public Component {
 };
 
 // =====================================================
-// SdImageComponent - Composant d'image SD
+// SdImageComponent - Composant d'image SD avec vrais décodeurs
 // =====================================================
 class SdImageComponent : public Component, public image::Image {
  public:
@@ -192,6 +198,18 @@ class SdImageComponent : public Component, public image::Image {
   bool decode_png(const std::vector<uint8_t> &png_data);
   bool load_raw_data(const std::vector<uint8_t> &raw_data);
   
+  // ===== VRAIS DÉCODEURS D'IMAGES =====
+  bool decode_jpeg_real(const std::vector<uint8_t> &jpeg_data);
+  bool decode_png_real(const std::vector<uint8_t> &png_data);
+  
+  // ===== FALLBACK DÉCODEURS (patterns de test) =====
+  bool decode_jpeg_fallback(const std::vector<uint8_t> &jpeg_data);
+  bool decode_png_fallback(const std::vector<uint8_t> &png_data);
+  
+  // ===== CALLBACKS POUR JPEGDEC =====
+  static int jpeg_read_callback(JPEGFILE *pFile, uint8_t *pBuf, int32_t iLen);
+  static int jpeg_seek_callback(JPEGFILE *pFile, int32_t iPosition);
+  
   // ===== DIMENSION EXTRACTION =====
   bool extract_jpeg_dimensions(const std::vector<uint8_t> &data, int &width, int &height) const;
   bool extract_png_dimensions(const std::vector<uint8_t> &data, int &width, int &height) const;
@@ -203,6 +221,10 @@ class SdImageComponent : public Component, public image::Image {
   size_t get_pixel_offset(int x, int y) const;
   void convert_byte_order();
   size_t calculate_output_size() const;
+  
+  // ===== CONVERSION DE FORMATS =====
+  void convert_rgb888_to_target(const uint8_t *rgb_data, size_t pixel_count);
+  void convert_rgba_to_target(const uint8_t *rgba_data, size_t pixel_count);
   
   // ===== TEST PATTERN GENERATION =====
   void generate_test_pattern(const std::vector<uint8_t> &source_data);
@@ -219,6 +241,10 @@ class SdImageComponent : public Component, public image::Image {
   std::string detect_file_type(const std::string &path) const;
   bool is_supported_format(const std::string &extension) const;
   void list_directory_contents(const std::string &dir_path);
+  
+  // ===== DONNÉES TEMPORAIRES POUR DÉCODEURS =====
+  std::vector<uint8_t> *jpeg_data_ptr_{nullptr};
+  size_t jpeg_position_{0};
 };
 
 // =====================================================
@@ -292,4 +318,5 @@ class SdImageUnloadAction : public Action<Ts...> {
 
 }  // namespace storage
 }  // namespace esphome
+
 
