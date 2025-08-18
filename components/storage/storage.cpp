@@ -367,57 +367,43 @@ bool SdImageComponent::load_image_from_path(const std::string &path) {
 // DÉCODEURS D'IMAGES
 // =====================================================
 
-bool SdImageComponent::decode_jpeg(const std::vector<uint8_t> &jpeg_data) {
-  ESP_LOGI(TAG_IMAGE, "=== JPEG DECODER START ===");
-  ESP_LOGI(TAG_IMAGE, "📊 Processing JPEG file: %zu bytes", jpeg_data.size());
-  
-  // Vérifier la signature JPEG
-  if (!this->is_jpeg_file(jpeg_data)) {
-    ESP_LOGE(TAG_IMAGE, "❌ Invalid JPEG signature");
-    return false;
-  }
-  
-  ESP_LOGI(TAG_IMAGE, "✅ JPEG signature verified");
-  
-  // Essayer le vrai décodeur JPEG
-  if (this->decode_jpeg_real(jpeg_data)) {
-    ESP_LOGI(TAG_IMAGE, "✅ JPEG decoded successfully with JPEGDEC library");
-    return true;
-  }
-  
-  // Fallback vers pattern de test si décodage échoue
-  ESP_LOGW(TAG_IMAGE, "⚠️ Real JPEG decoder failed, using fallback pattern");
-  return this->decode_jpeg_fallback(jpeg_data);
-}
-
-bool SdImageComponent::decode_png(const std::vector<uint8_t> &png_data) {
-  ESP_LOGI(TAG_IMAGE, "=== PNG DECODER START ===");
-  ESP_LOGI(TAG_IMAGE, "📊 Processing PNG file: %zu bytes", png_data.size());
-  
-  // Vérifier la signature PNG
-  if (!this->is_png_file(png_data)) {
-    ESP_LOGE(TAG_IMAGE, "❌ Invalid PNG signature");
-    return false;
-  }
-  
-  ESP_LOGI(TAG_IMAGE, "✅ PNG signature verified");
-  
-  // Pour l'instant, utiliser seulement le fallback pour PNG
-  ESP_LOGW(TAG_IMAGE, "⚠️ Real PNG decoder not integrated yet, using fallback pattern");
-  return this->decode_png_fallback(png_data);
-}
-
-// =====================================================
-// VRAI DÉCODEUR JPEG avec JPEGDEC (API simplifiée)
-// =====================================================
-
 bool SdImageComponent::decode_jpeg_real(const std::vector<uint8_t> &jpeg_data) {
   ESP_LOGI(TAG_IMAGE, "🔧 Using JPEGDEC library for real JPEG decoding");
   
   JPEGDEC jpeg;
   
-  // API simplifiée : utiliser openRAM avec callback simple
-  if (jpeg.openRAM((uint8_t*)jpeg_data.data(), jpeg_data.size(), nullptr) != 1) {
+  // Callback pour récupérer les pixels décodés
+  static std::vector<uint8_t> *target_buffer = nullptr;
+  static int target_width = 0;
+  static int target_height = 0;
+  
+  // Lambda function pour le callback de décodage
+  auto draw_callback = [](JPEGDRAW *pDraw) -> int {
+    if (!target_buffer || !pDraw) return 0;
+    
+    // Copier les pixels RGB888 dans notre buffer
+    int y_start = pDraw->y;
+    int x_start = pDraw->x;
+    int width = pDraw->iWidth;
+    int height = pDraw->iHeight;
+    
+    for (int y = 0; y < height; y++) {
+      for (int x = 0; x < width; x++) {
+        int src_offset = (y * width + x) * 3;
+        int dst_offset = ((y_start + y) * target_width + (x_start + x)) * 3;
+        
+        if (dst_offset + 2 < target_buffer->size()) {
+          (*target_buffer)[dst_offset + 0] = pDraw->pPixels[src_offset + 0]; // R
+          (*target_buffer)[dst_offset + 1] = pDraw->pPixels[src_offset + 1]; // G
+          (*target_buffer)[dst_offset + 2] = pDraw->pPixels[src_offset + 2]; // B
+        }
+      }
+    }
+    return 1;
+  };
+  
+  // Ouvrir le JPEG avec callback
+  if (jpeg.openRAM((uint8_t*)jpeg_data.data(), jpeg_data.size(), draw_callback) != 1) {
     ESP_LOGE(TAG_IMAGE, "❌ Failed to open JPEG with JPEGDEC");
     return false;
   }
@@ -436,35 +422,31 @@ bool SdImageComponent::decode_jpeg_real(const std::vector<uint8_t> &jpeg_data) {
     return false;
   }
   
-  // Allouer le buffer de sortie
-  size_t output_size = this->calculate_output_size();
-  this->image_data_.resize(output_size);
-  ESP_LOGI(TAG_IMAGE, "💾 Allocated %zu bytes for decoded image", output_size);
-  
-  // Buffer temporaire pour décodage RGB888
+  // Allouer le buffer temporaire pour RGB888
   std::vector<uint8_t> rgb_buffer(this->width_ * this->height_ * 3);
   
-  // Décoder l'image avec la méthode simple
-  ESP_LOGI(TAG_IMAGE, "🔄 Decoding JPEG...");
+  // Configurer les variables statiques pour le callback
+  target_buffer = &rgb_buffer;
+  target_width = this->width_;
+  target_height = this->height_;
   
+  ESP_LOGI(TAG_IMAGE, "🔄 Decoding JPEG with callback...");
+  
+  // Décoder l'image (le callback sera appelé automatiquement)
   if (jpeg.decode(0, 0, 0) != 1) {
     ESP_LOGE(TAG_IMAGE, "❌ Failed to decode JPEG");
     jpeg.close();
+    target_buffer = nullptr;
     return false;
   }
-  
-  // Récupérer les données décodées (simplifié)
-  uint8_t *jpeg_pixels = jpeg.getPixels();
-  if (!jpeg_pixels) {
-    ESP_LOGE(TAG_IMAGE, "❌ No pixel data available from JPEG decoder");
-    jpeg.close();
-    return false;
-  }
-  
-  // Copier et convertir les données
-  memcpy(rgb_buffer.data(), jpeg_pixels, this->width_ * this->height_ * 3);
   
   jpeg.close();
+  target_buffer = nullptr;
+  
+  // Allouer le buffer de sortie dans le format cible
+  size_t output_size = this->calculate_output_size();
+  this->image_data_.resize(output_size);
+  ESP_LOGI(TAG_IMAGE, "💾 Allocated %zu bytes for decoded image", output_size);
   
   // Convertir du RGB888 vers le format cible
   ESP_LOGI(TAG_IMAGE, "🔄 Converting RGB888 to %s...", this->get_output_format_string().c_str());
