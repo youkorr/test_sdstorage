@@ -393,8 +393,8 @@ bool SdImageComponent::load_raw_data(const std::vector<uint8_t> &raw_data) {
   } else {
     // Smaller file: copy what we can and fill the rest
     memcpy(this->image_data_.data(), raw_data.data(), raw_data.size());
-    memset(this->image_data_.data() + raw_data.size(), 0xFF, expected_size - raw_data.size()); // Fill with white instead of black
-    ESP_LOGW(TAG_IMAGE, "Copied %zu bytes, filled %zu bytes with white", 
+    memset(this->image_data_.data() + raw_data.size(), 0, expected_size - raw_data.size());
+    ESP_LOGW(TAG_IMAGE, "Copied %zu bytes, filled %zu bytes with zeros", 
              raw_data.size(), expected_size - raw_data.size());
   }
   
@@ -422,10 +422,9 @@ bool SdImageComponent::reload_image() {
   return this->load_image_from_path(this->file_path_);
 }
 
-// FIXED: Méthode draw améliorée avec plus de debugging et gestion d'erreurs
 void SdImageComponent::draw(int x, int y, display::Display *display, Color color_on, Color color_off) {
   if (!this->is_loaded_ || this->image_data_.empty()) {
-    ESP_LOGW(TAG_IMAGE, "Cannot draw: image not loaded or empty");
+    ESP_LOGD(TAG_IMAGE, "Cannot draw: image not loaded");
     return;
   }
   
@@ -434,8 +433,7 @@ void SdImageComponent::draw(int x, int y, display::Display *display, Color color
     return;
   }
 
-  ESP_LOGD(TAG_IMAGE, "Drawing image at (%d,%d) size %dx%d, data size: %zu", 
-           x, y, this->width_, this->height_, this->image_data_.size());
+  ESP_LOGV(TAG_IMAGE, "Drawing image at (%d,%d) size %dx%d", x, y, this->width_, this->height_);
 
   // Safety checks
   if (this->width_ <= 0 || this->height_ <= 0) {
@@ -449,17 +447,9 @@ void SdImageComponent::draw(int x, int y, display::Display *display, Color color
     return;
   }
 
-  // FIXED: Debug des premiers pixels pour diagnostiquer les images noires
-  if (this->image_data_.size() >= 6) {
-    ESP_LOGD(TAG_IMAGE, "First few pixels (hex): %02X %02X %02X %02X %02X %02X", 
-             this->image_data_[0], this->image_data_[1], this->image_data_[2],
-             this->image_data_[3], this->image_data_[4], this->image_data_[5]);
-  }
-
-  // Draw with robust error handling
+  // Draw with robust error handling without exceptions
   int pixels_drawn = 0;
   int pixels_skipped = 0;
-  int black_pixels = 0;
   
   for (int img_y = 0; img_y < this->height_; img_y++) {
     for (int img_x = 0; img_x < this->width_; img_x++) {
@@ -467,11 +457,6 @@ void SdImageComponent::draw(int x, int y, display::Display *display, Color color
       
       // get_pixel with integrated checks
       this->get_pixel(img_x, img_y, red, green, blue, alpha);
-      
-      // Count black pixels for debugging
-      if (red == 0 && green == 0 && blue == 0) {
-        black_pixels++;
-      }
       
       // Skip transparent pixels
       if (alpha == 0) {
@@ -494,14 +479,7 @@ void SdImageComponent::draw(int x, int y, display::Display *display, Color color
     }
   }
   
-  ESP_LOGD(TAG_IMAGE, "Draw completed: %d pixels drawn, %d skipped, %d black pixels (%.1f%%)", 
-           pixels_drawn, pixels_skipped, black_pixels, 
-           (black_pixels * 100.0f) / (this->width_ * this->height_));
-  
-  // FIXED: Alert si trop de pixels noirs (image probablement corrompue ou mal décodée)
-  if (black_pixels > (pixels_drawn * 0.9f)) {
-    ESP_LOGW(TAG_IMAGE, "⚠️  Image appears to be mostly black - possible decoding issue!");
-  }
+  ESP_LOGD(TAG_IMAGE, "Draw completed: %d pixels drawn, %d skipped", pixels_drawn, pixels_skipped);
 }
 
 image::ImageType SdImageComponent::get_image_type() const {
@@ -517,7 +495,6 @@ image::ImageType SdImageComponent::get_image_type() const {
   }
 }
 
-// FIXED: get_pixel avec validation renforcée
 void SdImageComponent::get_pixel(int x, int y, uint8_t &red, uint8_t &green, uint8_t &blue) const {
   uint8_t alpha;
   this->get_pixel(x, y, red, green, blue, alpha);
@@ -556,9 +533,9 @@ void SdImageComponent::convert_pixel_format(int x, int y, const uint8_t *pixel_d
     case OutputImageFormat::rgb565: {
       // Little endian: LSB first
       uint16_t pixel = pixel_data[0] | (pixel_data[1] << 8);
-      red = ((pixel >> 11) & 0x1F) << 3;   // 5 bits -> 8 bits
-      green = ((pixel >> 5) & 0x3F) << 2;  // 6 bits -> 8 bits
-      blue = (pixel & 0x1F) << 3;          // 5 bits -> 8 bits
+      red = ((pixel >> 11) & 0x1F) << 3;   // 5 bits -> 8 bits (with extension)
+      green = ((pixel >> 5) & 0x3F) << 2;  // 6 bits -> 8 bits (with extension)
+      blue = (pixel & 0x1F) << 3;          // 5 bits -> 8 bits (with extension)
       
       // Bit extension for better precision
       red |= red >> 5;
@@ -632,7 +609,12 @@ size_t SdImageComponent::calculate_output_size() const {
   return this->width_ * this->height_ * this->get_pixel_size();
 }
 
-// FIXED: Dimension extraction methods améliorées
+bool SdImageComponent::validate_image_data() const {
+  if (!this->is_loaded_) return false;
+  return !this->image_data_.empty() && this->validate_dimensions();
+}
+
+// Dimension extraction methods
 bool SdImageComponent::extract_jpeg_dimensions(const std::vector<uint8_t> &data, int &width, int &height) const {
   for (size_t i = 0; i < data.size() - 10; i++) {
     if (data[i] == 0xFF) {
@@ -642,7 +624,7 @@ bool SdImageComponent::extract_jpeg_dimensions(const std::vector<uint8_t> &data,
         if (i + 9 < data.size()) {
           height = (data[i + 5] << 8) | data[i + 6];
           width = (data[i + 7] << 8) | data[i + 8];
-          return width > 0 && height > 0;
+          return true;
         }
       }
     }
@@ -656,49 +638,34 @@ bool SdImageComponent::extract_png_dimensions(const std::vector<uint8_t> &data, 
     // Width: bytes 16-19, Height: bytes 20-23 (big endian)
     width = (data[16] << 24) | (data[17] << 16) | (data[18] << 8) | data[19];
     height = (data[20] << 24) | (data[21] << 16) | (data[22] << 8) | data[23];
-    return width > 0 && height > 0;
+    return true;
   }
   return false;
 }
 
-// FIXED: Pattern génération plus réaliste basée sur les vraies données du fichier
-void SdImageComponent::generate_realistic_pattern(const std::vector<uint8_t> &source_data) {
-  ESP_LOGI(TAG_IMAGE, "Generating realistic test pattern from source data");
-  
-  // Créer un seed basé sur les données source et les dimensions
-  uint32_t seed = 0x12345678;
-  size_t sample_size = std::min(source_data.size(), (size_t)64);
-  
-  for (size_t i = 0; i < sample_size; i++) {
-    seed = (seed * 31) + source_data[i];
+// Test pattern generation
+void SdImageComponent::generate_test_pattern(const std::vector<uint8_t> &source_data) {
+  // Create seed based on source data
+  uint32_t seed = 0;
+  for (size_t i = 0; i < std::min(source_data.size(), (size_t)16); i++) {
+    seed = (seed << 8) | source_data[i];
   }
-  seed ^= (this->width_ << 16) | this->height_;
   
-  ESP_LOGI(TAG_IMAGE, "Pattern seed: 0x%08X (from %zu bytes)", seed, sample_size);
+  ESP_LOGI(TAG_IMAGE, "Generating test pattern (seed: %u)", seed);
   
-  // Générer un gradient coloré au lieu d'un pattern random
   for (int y = 0; y < this->height_; y++) {
     for (int x = 0; x < this->width_; x++) {
       size_t offset = this->get_pixel_offset(x, y);
       
-      // Créer un gradient avec variation basée sur les données sources
-      float fx = (float)x / this->width_;
-      float fy = (float)y / this->height_;
+      // Use source data to create pseudo-random but deterministic pattern
+      uint32_t pixel_seed = seed + (y * this->width_ + x);
+      pixel_seed = pixel_seed * 1664525 + 1013904223; // Linear congruential generator
       
-      // Utiliser les données sources pour moduler les couleurs
-      uint32_t data_index = ((y * this->width_ + x) * sample_size) / (this->width_ * this->height_);
-      uint8_t data_influence = data_index < sample_size ? source_data[data_index] : 128;
+      uint8_t r = (pixel_seed >> 16) & 0xFF;
+      uint8_t g = (pixel_seed >> 8) & 0xFF;
+      uint8_t b = pixel_seed & 0xFF;
       
-      uint8_t r = (uint8_t)(fx * 255) ^ (data_influence >> 2);
-      uint8_t g = (uint8_t)(fy * 255) ^ (data_influence >> 1);  
-      uint8_t b = (uint8_t)((fx + fy) * 127) ^ data_influence;
-      
-      // Assurer des couleurs non-nulles
-      r = std::max((uint8_t)16, r);
-      g = std::max((uint8_t)16, g);  
-      b = std::max((uint8_t)16, b);
-      
-      // Appliquer le format de sortie
+      // Apply output format
       switch (this->output_format_) {
         case OutputImageFormat::rgb565: {
           uint16_t rgb565 = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
@@ -715,18 +682,11 @@ void SdImageComponent::generate_realistic_pattern(const std::vector<uint8_t> &so
           this->image_data_[offset + 0] = r;
           this->image_data_[offset + 1] = g;
           this->image_data_[offset + 2] = b;
-          this->image_data_[offset + 3] = 255; // Alpha opaque
+          this->image_data_[offset + 3] = 255; // Opaque alpha
           break;
       }
     }
-    
-    // Yield every few lines
-    if (y % 10 == 0) {
-      yield();
-    }
   }
-  
-  ESP_LOGI(TAG_IMAGE, "Pattern generation complete - should show colored gradient");
 }
 
 }  // namespace storage  
