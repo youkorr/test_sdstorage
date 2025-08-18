@@ -89,7 +89,7 @@ size_t StorageComponent::get_file_size(const std::string &path) {
 }
 
 // =====================================================
-// SdImageComponent Implementation
+// SdImageComponent Implementation  
 // =====================================================
 
 void SdImageComponent::setup() {
@@ -144,19 +144,15 @@ void SdImageComponent::set_byte_order_string(const std::string &byte_order) {
 }
 
 // Image type and format methods
-// Image type and format methods
 image::ImageType SdImageComponent::get_image_type() const {
   switch (this->output_format_) {
     case OutputImageFormat::rgb565:
       return image::IMAGE_TYPE_RGB565;
     case OutputImageFormat::rgb888:
-      return image::IMAGE_TYPE_RGB;       // ✅ Utilise RGB générique
     case OutputImageFormat::rgba:
-      return image::IMAGE_TYPE_RGB;       // ✅ Utilise RGB générique pour RGBA aussi
     default:
-      return image::IMAGE_TYPE_RGB565;
+      return image::IMAGE_TYPE_RGB;  // Format générique RGB
   }
-}
 }
 
 std::string SdImageComponent::get_output_format_string() const {
@@ -274,7 +270,7 @@ void SdImageComponent::list_directory_contents(const std::string &dir_path) {
 }
 
 // =====================================================
-// TON CODE D'IMAGE LOADING (copie exacte)
+// IMAGE LOADING METHODS
 // =====================================================
 
 bool SdImageComponent::load_image_from_path(const std::string &path) {
@@ -332,11 +328,13 @@ bool SdImageComponent::load_image_from_path(const std::string &path) {
   ESP_LOGI(TAG_IMAGE, "✅ Successfully read %zu bytes from file", file_data.size());
   
   // Show first few bytes for debugging
-  ESP_LOGI(TAG_IMAGE, "🔍 First 16 bytes: %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X", 
-           file_data[0], file_data[1], file_data[2], file_data[3],
-           file_data[4], file_data[5], file_data[6], file_data[7],
-           file_data[8], file_data[9], file_data[10], file_data[11],
-           file_data[12], file_data[13], file_data[14], file_data[15]);
+  if (file_data.size() >= 16) {
+    ESP_LOGI(TAG_IMAGE, "🔍 First 16 bytes: %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X %02X", 
+             file_data[0], file_data[1], file_data[2], file_data[3],
+             file_data[4], file_data[5], file_data[6], file_data[7],
+             file_data[8], file_data[9], file_data[10], file_data[11],
+             file_data[12], file_data[13], file_data[14], file_data[15]);
+  }
   
   // Detect file type with detailed logging
   bool decode_success = false;
@@ -417,25 +415,6 @@ bool SdImageComponent::decode_jpeg(const std::vector<uint8_t> &jpeg_data) {
   
   if (!this->extract_jpeg_dimensions(jpeg_data, detected_width, detected_height)) {
     ESP_LOGW(TAG_IMAGE, "⚠️ Could not extract JPEG dimensions from header");
-    ESP_LOGI(TAG_IMAGE, "🔍 Searching for SOF markers...");
-    
-    // More detailed search
-    bool found_sof = false;
-    for (size_t i = 0; i < jpeg_data.size() - 10; i++) {
-      if (jpeg_data[i] == 0xFF) {
-        uint8_t marker = jpeg_data[i + 1];
-        ESP_LOGV(TAG_IMAGE, "Found marker 0xFF%02X at position %zu", marker, i);
-        
-        if (marker >= 0xC0 && marker <= 0xC3) {
-          ESP_LOGI(TAG_IMAGE, "🎯 Found SOF marker 0xFF%02X at position %zu", marker, i);
-          found_sof = true;
-        }
-      }
-    }
-    
-    if (!found_sof) {
-      ESP_LOGW(TAG_IMAGE, "⚠️ No SOF markers found in JPEG");
-    }
     
     // Use default dimensions
     detected_width = 320;
@@ -496,15 +475,6 @@ bool SdImageComponent::decode_png(const std::vector<uint8_t> &png_data) {
   if (!this->extract_png_dimensions(png_data, detected_width, detected_height)) {
     ESP_LOGW(TAG_IMAGE, "⚠️ Could not extract PNG dimensions from IHDR");
     
-    // Show IHDR chunk info for debugging
-    if (png_data.size() >= 33) {
-      ESP_LOGI(TAG_IMAGE, "🔍 IHDR chunk info:");
-      ESP_LOGI(TAG_IMAGE, "   Length: %02X%02X%02X%02X", png_data[8], png_data[9], png_data[10], png_data[11]);
-      ESP_LOGI(TAG_IMAGE, "   Type: %c%c%c%c", png_data[12], png_data[13], png_data[14], png_data[15]);
-      ESP_LOGI(TAG_IMAGE, "   Width bytes: %02X%02X%02X%02X", png_data[16], png_data[17], png_data[18], png_data[19]);
-      ESP_LOGI(TAG_IMAGE, "   Height bytes: %02X%02X%02X%02X", png_data[20], png_data[21], png_data[22], png_data[23]);
-    }
-    
     // Use default dimensions
     detected_width = 320;
     detected_height = 240;
@@ -545,7 +515,7 @@ bool SdImageComponent::decode_png(const std::vector<uint8_t> &png_data) {
   return true;
 }
 
-// Améliorations des méthodes d'extraction de dimensions
+// Dimension extraction methods
 bool SdImageComponent::extract_jpeg_dimensions(const std::vector<uint8_t> &data, int &width, int &height) const {
   ESP_LOGD(TAG_IMAGE, "🔍 Scanning JPEG for SOF markers...");
   
@@ -591,8 +561,6 @@ bool SdImageComponent::extract_png_dimensions(const std::vector<uint8_t> &data, 
       return true;
     } else {
       ESP_LOGW(TAG_IMAGE, "⚠️ IHDR chunk not found at expected position");
-      ESP_LOGW(TAG_IMAGE, "   Expected: IHDR, Got: %c%c%c%c", 
-               data[12], data[13], data[14], data[15]);
     }
   } else {
     ESP_LOGW(TAG_IMAGE, "⚠️ PNG file too small for IHDR chunk: %zu bytes", data.size());
@@ -601,7 +569,7 @@ bool SdImageComponent::extract_png_dimensions(const std::vector<uint8_t> &data, 
   return false;
 }
 
-// Nouveaux patterns de test plus reconnaissables
+// Test pattern generation methods
 void SdImageComponent::generate_jpeg_test_pattern(const std::vector<uint8_t> &source_data) {
   ESP_LOGI(TAG_IMAGE, "🎨 Generating JPEG test pattern (gradient + hash pattern)");
   
@@ -649,7 +617,7 @@ void SdImageComponent::generate_png_test_pattern(const std::vector<uint8_t> &sou
   }
 }
 
-// Méthodes manquantes à ajouter au header
+// Helper methods
 bool SdImageComponent::load_image() {
   return this->load_image_from_path(this->file_path_);
 }
@@ -769,3 +737,4 @@ bool SdImageComponent::validate_image_data() const {
 
 }  // namespace storage
 }  // namespace esphome
+
