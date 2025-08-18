@@ -39,7 +39,7 @@ CONF_SD_COMPONENT = "sd_component"
 CONF_SD_IMAGES = "sd_images"
 CONF_FILE_PATH = "file_path"
 
-# Enums
+# Enums - FIXED: Proper enum declarations
 OutputImageFormat = storage_ns.enum("OutputImageFormat")
 OUTPUT_IMAGE_FORMATS = {
     "RGB565": OutputImageFormat.rgb565,
@@ -57,19 +57,19 @@ BYTE_ORDERS = {
 SdImageLoadAction = storage_ns.class_("SdImageLoadAction", automation.Action)
 SdImageUnloadAction = storage_ns.class_("SdImageUnloadAction", automation.Action)
 
-# Schema pour SdImageComponent - Simplifié pour éviter les erreurs d'attributs
+# Schema pour SdImageComponent - FIXED: Removed problematic set_image_type
 SD_IMAGE_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(SdImageComponent),
         cv.Required(CONF_FILE_PATH): cv.string,
-        cv.Optional(CONF_OUTPUT_FORMAT, default="rgb565"): cv.enum(OUTPUT_IMAGE_FORMATS, upper=True),
-        cv.Optional(CONF_BYTE_ORDER, default="little_endian"): cv.enum(BYTE_ORDERS, upper=True),
+        cv.Optional(CONF_OUTPUT_FORMAT, default="RGB565"): cv.enum(OUTPUT_IMAGE_FORMATS, upper=True),
+        cv.Optional(CONF_BYTE_ORDER, default="LITTLE_ENDIAN"): cv.enum(BYTE_ORDERS, upper=True),
         cv.Optional(CONF_RESIZE): cv.dimensions,
         cv.Optional(CONF_TYPE, default="SD_IMAGE"): cv.string,
     }
 )
 
-# Schema de validation pour StorageComponent - Structure selon votre format désiré
+# Schema de validation pour StorageComponent
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(StorageComponent),
@@ -80,7 +80,7 @@ CONFIG_SCHEMA = cv.Schema(
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
-# Actions pour charger/décharger des images - Using automation.register_action
+# Actions pour charger/décharger des images
 LOAD_ACTION_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.use_id(SdImageComponent),
     cv.Optional(CONF_FILE_PATH): cv.templatable(cv.string),
@@ -146,13 +146,15 @@ async def setup_sd_image_component(config, parent_storage):
     # Lier au composant storage parent
     cg.add(var.set_storage_component(parent_storage))
     
-    # Configuration de l'image
+    # Configuration de l'image - FIXED: Use proper enum values
     cg.add(var.set_file_path(config[CONF_FILE_PATH]))
-    cg.add(var.set_output_format_string(config[CONF_OUTPUT_FORMAT]))
-    cg.add(var.set_byte_order_string(config[CONF_BYTE_ORDER]))
     
-    # Définir le type pour la compatibilité
-    cg.add(var.set_image_type(config[CONF_TYPE]))
+    # FIXED: Pass enum values correctly
+    output_format = OUTPUT_IMAGE_FORMATS[config[CONF_OUTPUT_FORMAT]]
+    cg.add(var.set_output_format(output_format))
+    
+    byte_order = BYTE_ORDERS[config[CONF_BYTE_ORDER]]
+    cg.add(var.set_byte_order(byte_order))
     
     if CONF_RESIZE in config:
         cg.add(var.set_resize(config[CONF_RESIZE][0], config[CONF_RESIZE][1]))
@@ -228,8 +230,14 @@ async def image_to_code_hook(config):
             storage = await cg.get_variable(config[CONF_STORAGE_COMPONENT])
             cg.add(var.set_storage_component(storage))
         
-        cg.add(var.set_output_format_string(config.get(CONF_OUTPUT_FORMAT, "RGB565")))
-        cg.add(var.set_byte_order_string(config.get(CONF_BYTE_ORDER, "LITTLE_ENDIAN")))
+        # FIXED: Use enum values
+        if CONF_OUTPUT_FORMAT in config:
+            output_format = OUTPUT_IMAGE_FORMATS[config[CONF_OUTPUT_FORMAT]]
+            cg.add(var.set_output_format(output_format))
+        
+        if CONF_BYTE_ORDER in config:
+            byte_order = BYTE_ORDERS[config[CONF_BYTE_ORDER]]
+            cg.add(var.set_byte_order(byte_order))
         
         return var
     
