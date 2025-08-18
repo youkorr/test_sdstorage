@@ -32,7 +32,7 @@ void StorageComponent::setup() {
 }
 
 void StorageComponent::loop() {
-  // Rien pour le moment
+  // Nothing for now
 }
 
 void StorageComponent::dump_config() {
@@ -76,7 +76,7 @@ std::vector<uint8_t> StorageComponent::read_file_direct(const std::string &path)
     return {};
   }
   
-  // Obtenir la taille du fichier
+  // Get file size
   fseek(file, 0, SEEK_END);
   size_t file_size = ftell(file);
   fseek(file, 0, SEEK_SET);
@@ -89,10 +89,10 @@ std::vector<uint8_t> StorageComponent::read_file_direct(const std::string &path)
     return {};
   }
   
-  // Allouer le buffer
+  // Allocate buffer
   std::vector<uint8_t> data(file_size);
   
-  // Lire le fichier
+  // Read file
   size_t bytes_read = fread(data.data(), 1, file_size, file);
   fclose(file);
   
@@ -180,23 +180,31 @@ void SdImageComponent::dump_config() {
   }
 }
 
+// FIXED: String-based configuration methods to avoid enum compilation issues
 void SdImageComponent::set_output_format_string(const std::string &format) {
-  if (format == "RGB565") this->output_format_ = OutputImageFormat::rgb565;
-  else if (format == "RGB888") this->output_format_ = OutputImageFormat::rgb888;
-  else if (format == "RGBA") this->output_format_ = OutputImageFormat::rgba;
-  else {
+  if (format == "RGB565") {
+    this->output_format_ = OutputImageFormat::rgb565;
+  } else if (format == "RGB888") {
+    this->output_format_ = OutputImageFormat::rgb888;
+  } else if (format == "RGBA") {
+    this->output_format_ = OutputImageFormat::rgba;
+  } else {
     ESP_LOGW(TAG_IMAGE, "Unknown format: %s, using RGB565", format.c_str());
     this->output_format_ = OutputImageFormat::rgb565;
   }
+  ESP_LOGD(TAG_IMAGE, "Set output format: %s", format.c_str());
 }
 
 void SdImageComponent::set_byte_order_string(const std::string &byte_order) {
-  if (byte_order == "BIG_ENDIAN") this->byte_order_ = ByteOrder::big_endian;
-  else if (byte_order == "LITTLE_ENDIAN") this->byte_order_ = ByteOrder::little_endian;
-  else {
+  if (byte_order == "BIG_ENDIAN") {
+    this->byte_order_ = ByteOrder::big_endian;
+  } else if (byte_order == "LITTLE_ENDIAN") {
+    this->byte_order_ = ByteOrder::little_endian;
+  } else {
     ESP_LOGW(TAG_IMAGE, "Unknown byte order: %s, using little_endian", byte_order.c_str());
     this->byte_order_ = ByteOrder::little_endian;
   }
+  ESP_LOGD(TAG_IMAGE, "Set byte order: %s", byte_order.c_str());
 }
 
 std::string SdImageComponent::get_output_format_string() const {
@@ -228,18 +236,18 @@ bool SdImageComponent::load_image_from_path(const std::string &path) {
     return false;
   }
   
-  // Libérer l'image précédente si chargée
+  // Free previous image if loaded
   if (this->is_loaded_) {
     this->unload_image();
   }
   
-  // Vérifier si le fichier existe
+  // Check if file exists
   if (!this->storage_component_->file_exists_direct(path)) {
     ESP_LOGE(TAG_IMAGE, "Image file not found: %s", path.c_str());
     return false;
   }
   
-  // Lire les données depuis la SD
+  // Read data from SD
   std::vector<uint8_t> file_data = this->storage_component_->read_file_direct(path);
   
   if (file_data.empty()) {
@@ -249,7 +257,7 @@ bool SdImageComponent::load_image_from_path(const std::string &path) {
   
   ESP_LOGI(TAG_IMAGE, "Read %zu bytes from file", file_data.size());
   
-  // Détecter le type de fichier et décoder
+  // Detect file type and decode
   bool decode_success = false;
   if (this->is_jpeg_file(file_data)) {
     ESP_LOGI(TAG_IMAGE, "Detected JPEG file, decoding...");
@@ -259,7 +267,7 @@ bool SdImageComponent::load_image_from_path(const std::string &path) {
     decode_success = this->decode_png(file_data);
   } else {
     ESP_LOGI(TAG_IMAGE, "Assuming raw bitmap data");
-    // Pour les données brutes, nous devons connaître les dimensions à l'avance
+    // For raw data, we need dimensions set in advance
     if (this->width_ <= 0 || this->height_ <= 0) {
       ESP_LOGE(TAG_IMAGE, "Dimensions must be set for raw data. Current: %dx%d", 
                this->width_, this->height_);
@@ -273,7 +281,7 @@ bool SdImageComponent::load_image_from_path(const std::string &path) {
     return false;
   }
   
-  // Mettre à jour le chemin actuel
+  // Update current path
   this->file_path_ = path;
   this->is_loaded_ = true;
   
@@ -295,10 +303,10 @@ bool SdImageComponent::is_png_file(const std::vector<uint8_t> &data) const {
 bool SdImageComponent::decode_jpeg(const std::vector<uint8_t> &jpeg_data) {
   ESP_LOGI(TAG_IMAGE, "JPEG decoder: Processing %zu bytes", jpeg_data.size());
   
-  // Extraction des dimensions du header JPEG
+  // Extract dimensions from JPEG header
   int detected_width = 0, detected_height = 0;
   if (!this->extract_jpeg_dimensions(jpeg_data, detected_width, detected_height)) {
-    // Utiliser des dimensions par défaut si l'extraction échoue
+    // Use default dimensions if extraction fails
     detected_width = 320;
     detected_height = 240;
     ESP_LOGW(TAG_IMAGE, "JPEG dimensions not found, using defaults: %dx%d", detected_width, detected_height);
@@ -309,18 +317,18 @@ bool SdImageComponent::decode_jpeg(const std::vector<uint8_t> &jpeg_data) {
   this->width_ = detected_width;
   this->height_ = detected_height;
   
-  // Vérifier les limites raisonnables
+  // Check reasonable limits
   if (this->width_ <= 0 || this->height_ <= 0 || this->width_ > 2048 || this->height_ > 2048) {
     ESP_LOGE(TAG_IMAGE, "Invalid JPEG dimensions: %dx%d", this->width_, this->height_);
     return false;
   }
   
-  // Calculer la taille de sortie basée sur le format configuré
+  // Calculate output size based on configured format
   size_t output_size = this->calculate_output_size();
   this->image_data_.resize(output_size);
   
-  // IMPORTANT: ICI VOUS DEVRIEZ UTILISER UNE VRAIE BIBLIOTHÈQUE DE DÉCODAGE JPEG
-  // Pour l'instant, simulation avec un motif réaliste
+  // IMPORTANT: HERE YOU SHOULD USE A REAL JPEG DECODING LIBRARY
+  // For now, simulation with realistic pattern
   this->generate_test_pattern(jpeg_data);
   
   ESP_LOGI(TAG_IMAGE, "JPEG processing complete: %dx%d %s (%zu bytes)", 
@@ -332,10 +340,10 @@ bool SdImageComponent::decode_jpeg(const std::vector<uint8_t> &jpeg_data) {
 bool SdImageComponent::decode_png(const std::vector<uint8_t> &png_data) {
   ESP_LOGI(TAG_IMAGE, "PNG decoder: Processing %zu bytes", png_data.size());
   
-  // Extraction des dimensions PNG depuis le chunk IHDR
+  // Extract PNG dimensions from IHDR chunk
   int detected_width = 0, detected_height = 0;
   if (!this->extract_png_dimensions(png_data, detected_width, detected_height)) {
-    // Utiliser des dimensions par défaut si l'extraction échoue
+    // Use default dimensions if extraction fails
     detected_width = 320;
     detected_height = 240;
     ESP_LOGW(TAG_IMAGE, "PNG dimensions not found, using defaults: %dx%d", detected_width, detected_height);
@@ -346,17 +354,17 @@ bool SdImageComponent::decode_png(const std::vector<uint8_t> &png_data) {
   this->width_ = detected_width;
   this->height_ = detected_height;
   
-  // Vérifier les limites
+  // Check limits
   if (this->width_ <= 0 || this->height_ <= 0 || this->width_ > 2048 || this->height_ > 2048) {
     ESP_LOGE(TAG_IMAGE, "Invalid PNG dimensions: %dx%d", this->width_, this->height_);
     return false;
   }
   
-  // Créer une image dans le format configuré
+  // Create image in configured format
   size_t output_size = this->calculate_output_size();
   this->image_data_.resize(output_size);
   
-  // Générer un motif différent pour PNG
+  // Generate different pattern for PNG
   this->generate_test_pattern(png_data);
   
   ESP_LOGI(TAG_IMAGE, "PNG processing complete: %dx%d %s (%zu bytes)", 
@@ -368,29 +376,29 @@ bool SdImageComponent::decode_png(const std::vector<uint8_t> &png_data) {
 bool SdImageComponent::load_raw_data(const std::vector<uint8_t> &raw_data) {
   ESP_LOGI(TAG_IMAGE, "Loading raw bitmap data (%zu bytes)", raw_data.size());
   
-  // Calculer la taille attendue
+  // Calculate expected size
   size_t expected_size = this->calculate_output_size();
   
   ESP_LOGI(TAG_IMAGE, "Raw image: %dx%d, format: %s, expected: %zu bytes, got: %zu bytes",
            this->width_, this->height_, this->get_output_format_string().c_str(), 
            expected_size, raw_data.size());
   
-  // Adapter la taille et copier les données
+  // Adjust size and copy data
   this->image_data_.resize(expected_size);
   
   if (raw_data.size() >= expected_size) {
-    // Fichier plus grand ou égal: copier seulement ce dont on a besoin
+    // File larger or equal: copy only what we need
     memcpy(this->image_data_.data(), raw_data.data(), expected_size);
     ESP_LOGI(TAG_IMAGE, "Copied %zu bytes from larger file", expected_size);
   } else {
-    // Fichier plus petit: copier ce qu'on peut et remplir le reste
+    // Smaller file: copy what we can and fill the rest
     memcpy(this->image_data_.data(), raw_data.data(), raw_data.size());
     memset(this->image_data_.data() + raw_data.size(), 0, expected_size - raw_data.size());
     ESP_LOGW(TAG_IMAGE, "Copied %zu bytes, filled %zu bytes with zeros", 
              raw_data.size(), expected_size - raw_data.size());
   }
   
-  // Conversion de l'ordre des bytes si nécessaire
+  // Convert byte order if necessary
   if (this->byte_order_ == ByteOrder::big_endian && this->get_pixel_size() > 1) {
     ESP_LOGD(TAG_IMAGE, "Converting byte order to little endian");
     this->convert_byte_order();
@@ -427,7 +435,7 @@ void SdImageComponent::draw(int x, int y, display::Display *display, Color color
 
   ESP_LOGV(TAG_IMAGE, "Drawing image at (%d,%d) size %dx%d", x, y, this->width_, this->height_);
 
-  // Vérifications de sécurité
+  // Safety checks
   if (this->width_ <= 0 || this->height_ <= 0) {
     ESP_LOGE(TAG_IMAGE, "Invalid dimensions: %dx%d", this->width_, this->height_);
     return;
@@ -439,7 +447,7 @@ void SdImageComponent::draw(int x, int y, display::Display *display, Color color
     return;
   }
 
-  // Dessiner avec gestion d'erreurs robuste sans exceptions
+  // Draw with robust error handling without exceptions
   int pixels_drawn = 0;
   int pixels_skipped = 0;
   
@@ -447,7 +455,7 @@ void SdImageComponent::draw(int x, int y, display::Display *display, Color color
     for (int img_x = 0; img_x < this->width_; img_x++) {
       uint8_t red, green, blue, alpha = 255;
       
-      // get_pixel avec vérifications intégrées
+      // get_pixel with integrated checks
       this->get_pixel(img_x, img_y, red, green, blue, alpha);
       
       // Skip transparent pixels
@@ -460,12 +468,12 @@ void SdImageComponent::draw(int x, int y, display::Display *display, Color color
       int screen_x = x + img_x;
       int screen_y = y + img_y;
       
-      // Vérifier les limites de l'écran si possible
+      // Check screen bounds if possible
       display->draw_pixel_at(screen_x, screen_y, pixel_color);
       pixels_drawn++;
     }
     
-    // Yield périodiquement pour éviter les watchdog timeouts
+    // Yield periodically to avoid watchdog timeouts
     if (img_y % 20 == 0) {
       yield();
     }
@@ -493,10 +501,10 @@ void SdImageComponent::get_pixel(int x, int y, uint8_t &red, uint8_t &green, uin
 }
 
 void SdImageComponent::get_pixel(int x, int y, uint8_t &red, uint8_t &green, uint8_t &blue, uint8_t &alpha) const {
-  // Initialiser à des valeurs sûres
+  // Initialize to safe values
   red = green = blue = alpha = 0;
   
-  // Vérifications de base
+  // Basic checks
   if (!this->is_loaded_ || this->image_data_.empty()) {
     return;
   }
@@ -505,7 +513,7 @@ void SdImageComponent::get_pixel(int x, int y, uint8_t &red, uint8_t &green, uin
     return;
   }
   
-  // Calculs d'offset sécurisés
+  // Safe offset calculations
   size_t pixel_size = this->get_pixel_size();
   size_t offset = this->get_pixel_offset(x, y);
   
@@ -525,11 +533,11 @@ void SdImageComponent::convert_pixel_format(int x, int y, const uint8_t *pixel_d
     case OutputImageFormat::rgb565: {
       // Little endian: LSB first
       uint16_t pixel = pixel_data[0] | (pixel_data[1] << 8);
-      red = ((pixel >> 11) & 0x1F) << 3;   // 5 bits -> 8 bits (avec extension)
-      green = ((pixel >> 5) & 0x3F) << 2;  // 6 bits -> 8 bits (avec extension)
-      blue = (pixel & 0x1F) << 3;          // 5 bits -> 8 bits (avec extension)
+      red = ((pixel >> 11) & 0x1F) << 3;   // 5 bits -> 8 bits (with extension)
+      green = ((pixel >> 5) & 0x3F) << 2;  // 6 bits -> 8 bits (with extension)
+      blue = (pixel & 0x1F) << 3;          // 5 bits -> 8 bits (with extension)
       
-      // Extension des bits pour une meilleure précision
+      // Bit extension for better precision
       red |= red >> 5;
       green |= green >> 6; 
       blue |= blue >> 5;
@@ -606,7 +614,7 @@ bool SdImageComponent::validate_image_data() const {
   return !this->image_data_.empty() && this->validate_dimensions();
 }
 
-// Méthodes d'extraction de dimensions
+// Dimension extraction methods
 bool SdImageComponent::extract_jpeg_dimensions(const std::vector<uint8_t> &data, int &width, int &height) const {
   for (size_t i = 0; i < data.size() - 10; i++) {
     if (data[i] == 0xFF) {
@@ -626,8 +634,8 @@ bool SdImageComponent::extract_jpeg_dimensions(const std::vector<uint8_t> &data,
 
 bool SdImageComponent::extract_png_dimensions(const std::vector<uint8_t> &data, int &width, int &height) const {
   if (data.size() >= 24) {
-    // Le chunk IHDR commence à l'offset 16 dans un PNG valide
-    // Largeur: bytes 16-19, Hauteur: bytes 20-23 (big endian)
+    // IHDR chunk starts at offset 16 in a valid PNG
+    // Width: bytes 16-19, Height: bytes 20-23 (big endian)
     width = (data[16] << 24) | (data[17] << 16) | (data[18] << 8) | data[19];
     height = (data[20] << 24) | (data[21] << 16) | (data[22] << 8) | data[23];
     return true;
@@ -635,9 +643,9 @@ bool SdImageComponent::extract_png_dimensions(const std::vector<uint8_t> &data, 
   return false;
 }
 
-// Génération de motifs de test
+// Test pattern generation
 void SdImageComponent::generate_test_pattern(const std::vector<uint8_t> &source_data) {
-  // Créer un seed basé sur les données source
+  // Create seed based on source data
   uint32_t seed = 0;
   for (size_t i = 0; i < std::min(source_data.size(), (size_t)16); i++) {
     seed = (seed << 8) | source_data[i];
@@ -649,7 +657,7 @@ void SdImageComponent::generate_test_pattern(const std::vector<uint8_t> &source_
     for (int x = 0; x < this->width_; x++) {
       size_t offset = this->get_pixel_offset(x, y);
       
-      // Utiliser les données source pour créer un motif pseudo-aléatoire mais déterministe
+      // Use source data to create pseudo-random but deterministic pattern
       uint32_t pixel_seed = seed + (y * this->width_ + x);
       pixel_seed = pixel_seed * 1664525 + 1013904223; // Linear congruential generator
       
@@ -657,7 +665,7 @@ void SdImageComponent::generate_test_pattern(const std::vector<uint8_t> &source_
       uint8_t g = (pixel_seed >> 8) & 0xFF;
       uint8_t b = pixel_seed & 0xFF;
       
-      // Appliquer le format de sortie
+      // Apply output format
       switch (this->output_format_) {
         case OutputImageFormat::rgb565: {
           uint16_t rgb565 = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
@@ -674,7 +682,7 @@ void SdImageComponent::generate_test_pattern(const std::vector<uint8_t> &source_
           this->image_data_[offset + 0] = r;
           this->image_data_[offset + 1] = g;
           this->image_data_[offset + 2] = b;
-          this->image_data_[offset + 3] = 255; // Alpha opaque
+          this->image_data_[offset + 3] = 255; // Opaque alpha
           break;
       }
     }
