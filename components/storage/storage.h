@@ -14,9 +14,7 @@
 
 // Décodeurs d'images
 #include <JPEGDEC.h>
-extern "C" {
-  #include <upng.h>
-}
+
 
 namespace esphome {
 namespace storage {
