@@ -39,18 +39,16 @@ CONF_SD_COMPONENT = "sd_component"
 CONF_SD_IMAGES = "sd_images"
 CONF_FILE_PATH = "file_path"
 
-# FIXED: Correct ESPHome enum registration
-OutputImageFormat = storage_ns.enum("OutputImageFormat", is_class=True)
+# FIXED: Use simple string mappings instead of enums to avoid compilation issues
 CONF_OUTPUT_IMAGE_FORMATS = {
-    "RGB565": OutputImageFormat.rgb565,
-    "RGB888": OutputImageFormat.rgb888,
-    "RGBA": OutputImageFormat.rgba,
+    "RGB565": "RGB565",
+    "RGB888": "RGB888", 
+    "RGBA": "RGBA",
 }
 
-ByteOrder = storage_ns.enum("ByteOrder", is_class=True)  
 CONF_BYTE_ORDERS = {
-    "LITTLE_ENDIAN": ByteOrder.little_endian,
-    "BIG_ENDIAN": ByteOrder.big_endian,
+    "LITTLE_ENDIAN": "LITTLE_ENDIAN",
+    "BIG_ENDIAN": "BIG_ENDIAN",
 }
 
 # Actions - Using standard ESPHome automation framework
@@ -146,10 +144,15 @@ async def setup_sd_image_component(config, parent_storage):
     # Lier au composant storage parent
     cg.add(var.set_storage_component(parent_storage))
     
-    # Configuration de l'image - FIXED: Direct string methods to avoid enum issues
+    # FIXED: Pass strings directly instead of enum values
     cg.add(var.set_file_path(config[CONF_FILE_PATH]))
-    cg.add(var.set_output_format_string(config[CONF_OUTPUT_FORMAT]))
-    cg.add(var.set_byte_order_string(config[CONF_BYTE_ORDER]))
+    
+    # Get the string values from the config (they're already strings due to our mapping)
+    output_format_str = config[CONF_OUTPUT_FORMAT]  # This is already a string like "RGB565"
+    byte_order_str = config[CONF_BYTE_ORDER]        # This is already a string like "LITTLE_ENDIAN"
+    
+    cg.add(var.set_output_format_string(output_format_str))
+    cg.add(var.set_byte_order_string(byte_order_str))
     
     if CONF_RESIZE in config:
         cg.add(var.set_resize(config[CONF_RESIZE][0], config[CONF_RESIZE][1]))
@@ -225,9 +228,12 @@ async def image_to_code_hook(config):
             storage = await cg.get_variable(config[CONF_STORAGE_COMPONENT])
             cg.add(var.set_storage_component(storage))
         
-        # Use string methods instead of enum to avoid compilation issues
-        cg.add(var.set_output_format_string(config.get(CONF_OUTPUT_FORMAT, "RGB565")))
-        cg.add(var.set_byte_order_string(config.get(CONF_BYTE_ORDER, "LITTLE_ENDIAN")))
+        # Use string methods with proper string values
+        format_str = config.get(CONF_OUTPUT_FORMAT, "RGB565")
+        byte_order_str = config.get(CONF_BYTE_ORDER, "LITTLE_ENDIAN")
+        
+        cg.add(var.set_output_format_string(format_str))
+        cg.add(var.set_byte_order_string(byte_order_str))
         
         return var
     
