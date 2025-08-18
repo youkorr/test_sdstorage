@@ -496,14 +496,10 @@ bool SdImageComponent::decode_jpeg_real(const std::vector<uint8_t> &jpeg_data) {
 // =====================================================
 
 bool SdImageComponent::decode_png_real(const std::vector<uint8_t> &png_data) {
-  ESP_LOGI(TAG_IMAGE, "🔧 Using upng library for real PNG decoding");
-  
-  // Décoder avec upng
-  upng_t* upng = upng_new_from_bytes(png_data.data(), png_data.size());
-  if (!upng) {
-    ESP_LOGE(TAG_IMAGE, "❌ Failed to create upng decoder");
-    return false;
-  }
+  ESP_LOGW(TAG_IMAGE, "⚠️ upng library not yet integrated, using fallback decoder");
+  return false;  // Force l'utilisation du fallback (pattern de test)
+}
+
   
   if (upng_decode(upng) != UPNG_EOK) {
     ESP_LOGE(TAG_IMAGE, "❌ Failed to decode PNG: %s", 
