@@ -144,17 +144,19 @@ void SdImageComponent::set_byte_order_string(const std::string &byte_order) {
 }
 
 // Image type and format methods
+// Image type and format methods
 image::ImageType SdImageComponent::get_image_type() const {
   switch (this->output_format_) {
     case OutputImageFormat::rgb565:
       return image::IMAGE_TYPE_RGB565;
     case OutputImageFormat::rgb888:
-      return image::IMAGE_TYPE_RGB24;
+      return image::IMAGE_TYPE_RGB;       // ✅ Utilise RGB générique
     case OutputImageFormat::rgba:
-      return image::IMAGE_TYPE_RGBA;
+      return image::IMAGE_TYPE_RGB;       // ✅ Utilise RGB générique pour RGBA aussi
     default:
       return image::IMAGE_TYPE_RGB565;
   }
+}
 }
 
 std::string SdImageComponent::get_output_format_string() const {
