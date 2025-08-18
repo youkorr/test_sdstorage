@@ -439,7 +439,7 @@ void SdImageComponent::draw(int x, int y, display::Display *display, Color color
     uint8_t r, g, b;
     this->get_pixel(i, 0, r, g, b);
     ESP_LOGD(TAG_IMAGE, "Pixel %d: RGB(%d,%d,%d)", i, r, g, b);
-  }
+  
   }
   
   if (!display) {
