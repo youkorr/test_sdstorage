@@ -344,35 +344,65 @@ bool SdImageComponent::decode_jpeg(const std::vector<uint8_t> &jpeg_data) {
 bool SdImageComponent::decode_png(const std::vector<uint8_t> &png_data) {
   ESP_LOGI(TAG_IMAGE, "PNG decoder: Processing %zu bytes", png_data.size());
   
-  // Extract PNG dimensions from IHDR chunk
-  int detected_width = 0, detected_height = 0;
-  if (!this->extract_png_dimensions(png_data, detected_width, detected_height)) {
-    // Use default dimensions if extraction fails
-    detected_width = 320;
-    detected_height = 240;
-    ESP_LOGW(TAG_IMAGE, "PNG dimensions not found, using defaults: %dx%d", detected_width, detected_height);
-  } else {
-    ESP_LOGI(TAG_IMAGE, "PNG dimensions detected: %dx%d", detected_width, detected_height);
-  }
+  // Décodage PNG réel avec lodepng (exemple)
+  /*
+  std::vector<unsigned char> decoded_rgba;
+  unsigned width, height;
   
-  this->width_ = detected_width;
-  this->height_ = detected_height;
-  
-  // Check limits
-  if (this->width_ <= 0 || this->height_ <= 0 || this->width_ > 2048 || this->height_ > 2048) {
-    ESP_LOGE(TAG_IMAGE, "Invalid PNG dimensions: %dx%d", this->width_, this->height_);
+  unsigned error = lodepng::decode(decoded_rgba, width, height, png_data);
+  if (error) {
+    ESP_LOGE(TAG_IMAGE, "PNG decode error: %s", lodepng_error_text(error));
     return false;
   }
   
-  // Create image in configured format
+  this->width_ = width;
+  this->height_ = height;
+  
+  // Convertir RGBA vers le format de sortie souhaité
   size_t output_size = this->calculate_output_size();
   this->image_data_.resize(output_size);
   
-  // Generate different pattern for PNG
-  this->generate_test_pattern(png_data);
+  for (int y = 0; y < height; y++) {
+    for (int x = 0; x < width; x++) {
+      size_t rgba_offset = (y * width + x) * 4;
+      size_t output_offset = this->get_pixel_offset(x, y);
+      
+      uint8_t r = decoded_rgba[rgba_offset + 0];
+      uint8_t g = decoded_rgba[rgba_offset + 1];  
+      uint8_t b = decoded_rgba[rgba_offset + 2];
+      uint8_t a = decoded_rgba[rgba_offset + 3];
+      
+      // Convertir vers format de sortie
+      if (this->output_format_ == OutputImageFormat::rgb565) {
+        uint16_t rgb565 = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+        this->image_data_[output_offset + 0] = rgb565 & 0xFF;
+        this->image_data_[output_offset + 1] = (rgb565 >> 8) & 0xFF;
+      }
+      // etc...
+    }
+  }
+  */
   
-  ESP_LOGI(TAG_IMAGE, "PNG processing complete: %dx%d %s (%zu bytes)", 
-           this->width_, this->height_, this->get_output_format_string().c_str(), output_size);
+  // Pour l'instant, utilisez votre generate_test_pattern
+  // mais avec des dimensions extraites
+  int detected_width = 0, detected_height = 0;
+  if (this->extract_png_dimensions(png_data, detected_width, detected_height)) {
+    this->width_ = detected_width;
+    this->height_ = detected_height;
+    ESP_LOGI(TAG_IMAGE, "✅ PNG dimensions extracted: %dx%d", this->width_, this->height_);
+  } else {
+    ESP_LOGW(TAG_IMAGE, "⚠️ Could not extract PNG dimensions, using defaults");
+    this->width_ = 320;
+    this->height_ = 240;
+  }
+  
+  size_t output_size = this->calculate_output_size();
+  this->image_data_.resize(output_size);
+  
+  ESP_LOGI(TAG_IMAGE, "Generating test pattern for %dx%d image (%zu bytes)", 
+           this->width_, this->height_, output_size);
+  
+  this->generate_test_pattern(png_data);
   
   return true;
 }
