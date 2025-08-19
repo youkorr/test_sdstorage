@@ -191,7 +191,7 @@ class SdImageComponent : public Component, public image::Image {
   bool is_loaded_{false};
   std::vector<uint8_t> image_data_;
   StorageComponent *storage_component_{nullptr};
-  
+
  private:
   // ===== FILE TYPE DETECTION =====
   bool is_jpeg_file(const std::vector<uint8_t> &data) const;
@@ -205,6 +205,22 @@ class SdImageComponent : public Component, public image::Image {
   // ===== VRAIS DÉCODEURS D'IMAGES =====
   bool decode_jpeg_real(const std::vector<uint8_t> &jpeg_data);
   bool decode_png_real(const std::vector<uint8_t> &png_data);
+  
+  // ===== DÉCODAGE PAR TILES (NOUVEAU) =====
+  bool decode_jpeg_tiled(const std::vector<uint8_t> &jpeg_data);
+  bool decode_jpeg_tile(const std::vector<uint8_t> &jpeg_data, int tile_x, int tile_y, int tile_w, int tile_h);
+  static int tile_callback_wrapper(JPEGDRAW *pDraw);
+  
+  // ===== CONTEXTE GLOBAL POUR TILES =====
+  struct TileContext {
+    SdImageComponent *instance;
+    int tile_x;
+    int tile_y; 
+    int tile_w;
+    int tile_h;
+    bool active;
+  };
+  static TileContext g_tile_context;
   
   // ===== FALLBACK DÉCODEURS (patterns de test) =====
   bool decode_jpeg_fallback(const std::vector<uint8_t> &jpeg_data);
@@ -236,9 +252,6 @@ class SdImageComponent : public Component, public image::Image {
   std::string detect_file_type(const std::string &path) const;
   bool is_supported_format(const std::string &extension) const;
   void list_directory_contents(const std::string &dir_path);
-
-  bool decode_jpeg_tiled(const std::vector<uint8_t> &jpeg_data);
-  bool decode_jpeg_tile(const std::vector<uint8_t> &jpeg_data, int x, int y, int w, int h);
 };
 
 // =====================================================
@@ -312,4 +325,5 @@ class SdImageUnloadAction : public Action<Ts...> {
 
 }  // namespace storage
 }  // namespace esphome
+
 
