@@ -1,18 +1,16 @@
 #include "storage.h"
 #include "esphome/core/log.h"
-#include "esphome/core/hal.h"
-#include "esphome/core/helpers.h"
+#include "esphome/core/application.h"
 #include <sys/stat.h>
 #include <dirent.h>
 #include <errno.h>
 #include <algorithm>
 
-// Includes pour ESP32
-#ifdef ESP32
+// Includes pour ESP-IDF
 #include <freertos/FreeRTOS.h>
 #include <freertos/task.h>
 #include <esp_task_wdt.h>
-#endif
+#include <esp_timer.h>
 
 namespace esphome {
 namespace storage {
@@ -491,8 +489,8 @@ bool SdImageComponent::decode_jpeg_tiled(const std::vector<uint8_t> &jpeg_data) 
   ESP_LOGI(TAG_IMAGE, "🔄 Processing %d tiles...", total_tiles);
   
   // Variables pour le monitoring du watchdog
-  uint32_t last_yield_time = millis();
-  const uint32_t yield_interval = 100; // Yield toutes les 100ms
+  int64_t last_yield_time = esp_timer_get_time();
+  const int64_t yield_interval = 100000; // 100ms en microsecondes
   
   for (int y = 0; y < this->height_; y += tile_size) {
     for (int x = 0; x < this->width_; x += tile_size) {
@@ -509,16 +507,16 @@ bool SdImageComponent::decode_jpeg_tiled(const std::vector<uint8_t> &jpeg_data) 
       
       tiles_processed++;
       
-      // Yield périodiquement pour éviter le watchdog (méthode ESPHome)
-      uint32_t current_time = millis();
+      // Yield périodiquement pour éviter le watchdog (ESP-IDF)
+      int64_t current_time = esp_timer_get_time();
       if (current_time - last_yield_time >= yield_interval) {
-        App.feed_wdt(); // Méthode ESPHome pour nourrir le watchdog
-        last_yield_time = current_time;
+        // Nourrir le watchdog ESP-IDF
+        esp_task_wdt_reset();
         
-        #ifdef ESP32
-        // Yield de la tâche ESP32 si disponible
-        vTaskDelay(1 / portTICK_PERIOD_MS);
-        #endif
+        // Céder la main aux autres tâches
+        vTaskDelay(pdMS_TO_TICKS(1));
+        
+        last_yield_time = current_time;
       }
       
       // Affichage du progrès pour grandes images
@@ -527,10 +525,8 @@ bool SdImageComponent::decode_jpeg_tiled(const std::vector<uint8_t> &jpeg_data) 
         ESP_LOGI(TAG_IMAGE, "📊 Progress: %d%% (%d/%d tiles)", progress, tiles_processed, total_tiles);
         
         // Force un yield sur les grandes images
-        App.feed_wdt();
-        #ifdef ESP32
-        vTaskDelay(2 / portTICK_PERIOD_MS);
-        #endif
+        esp_task_wdt_reset();
+        vTaskDelay(pdMS_TO_TICKS(2));
       }
     }
   }
@@ -542,6 +538,7 @@ bool SdImageComponent::decode_jpeg_tiled(const std::vector<uint8_t> &jpeg_data) 
   
   return true;
 }
+
 
 bool SdImageComponent::decode_jpeg_tile(const std::vector<uint8_t> &jpeg_data, 
                                        int tile_x, int tile_y, int tile_w, int tile_h) {
