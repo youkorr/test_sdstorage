@@ -372,16 +372,15 @@ bool SdImageComponent::load_image_from_path(const std::string &path) {
 }
 
 // =====================================================
-// DÉCODEUR JPEG CORRIGÉ - Version sans stack overflow
+// DÉCODEUR JPEG CORRIGÉ - Version finale
 // =====================================================
 
 bool SdImageComponent::decode_jpeg_real(const std::vector<uint8_t> &jpeg_data) {
   ESP_LOGI(TAG_IMAGE, "🔧 Using JPEGDEC library for real JPEG decoding");
   
-  // Créer l'instance JPEGDEC sur le heap pour éviter les problèmes de stack
   JPEGDEC jpeg;
   
-  // Callback amélioré et sécurisé
+  // Callback optimisé et sécurisé
   auto draw_callback = [](JPEGDRAW *pDraw) -> int {
     if (!pDraw || !pDraw->pUser) {
       ESP_LOGE(TAG_IMAGE, "Invalid callback parameters");
@@ -393,10 +392,10 @@ bool SdImageComponent::decode_jpeg_real(const std::vector<uint8_t> &jpeg_data) {
     ESP_LOGV(TAG_IMAGE, "Decode MCU: x=%d, y=%d, w=%d, h=%d", 
              pDraw->x, pDraw->y, pDraw->iWidth, pDraw->iHeight);
     
-    // Vérifications de sécurité
+    // Vérifications de sécurité strictes
     if (pDraw->x < 0 || pDraw->y < 0 || 
         pDraw->x >= instance->width_ || pDraw->y >= instance->height_) {
-      ESP_LOGW(TAG_IMAGE, "MCU outside image bounds, skipping");
+      ESP_LOGV(TAG_IMAGE, "MCU outside image bounds, skipping");
       return 1; // Continue quand même
     }
     
@@ -408,7 +407,7 @@ bool SdImageComponent::decode_jpeg_real(const std::vector<uint8_t> &jpeg_data) {
       return 1;
     }
     
-    // Copier les pixels ligne par ligne
+    // Copier les pixels ligne par ligne avec vérifications
     for (int y = 0; y < copy_height; y++) {
       int target_y = pDraw->y + y;
       if (target_y >= instance->height_) break;
@@ -417,7 +416,7 @@ bool SdImageComponent::decode_jpeg_real(const std::vector<uint8_t> &jpeg_data) {
         int target_x = pDraw->x + x;
         if (target_x >= instance->width_) break;
         
-        // Calculer les indices
+        // Calculer les indices avec vérifications
         int src_idx = (y * pDraw->iWidth + x) * 3; // RGB888 depuis JPEGDEC
         
         // Vérifier les limites du buffer source
@@ -430,11 +429,11 @@ bool SdImageComponent::decode_jpeg_real(const std::vector<uint8_t> &jpeg_data) {
         uint8_t g = pDraw->pPixels[src_idx + 1];
         uint8_t b = pDraw->pPixels[src_idx + 2];
         
-        // Calculer l'offset de destination
+        // Calculer l'offset de destination avec vérification
         size_t dst_offset = instance->get_pixel_offset(target_x, target_y);
-        
-        // Écrire le pixel dans le format cible
-        instance->set_pixel_at_offset(dst_offset, r, g, b, 255);
+        if (dst_offset + instance->get_pixel_size() <= instance->image_data_.size()) {
+          instance->set_pixel_at_offset(dst_offset, r, g, b, 255);
+        }
       }
     }
     
@@ -449,16 +448,14 @@ bool SdImageComponent::decode_jpeg_real(const std::vector<uint8_t> &jpeg_data) {
     return false;
   }
   
-  // Récupérer les informations de l'image
+  // Récupérer les informations de l'image (méthodes disponibles)
   int detected_width = jpeg.getWidth();
   int detected_height = jpeg.getHeight();
   int jpeg_subsample = jpeg.getSubSample();
-  int jpeg_mcu_pixels = jpeg.getMCUPixels();
   
   ESP_LOGI(TAG_IMAGE, "📏 JPEG info from JPEGDEC:");
   ESP_LOGI(TAG_IMAGE, "   Dimensions: %dx%d", detected_width, detected_height);
   ESP_LOGI(TAG_IMAGE, "   Subsample: %d", jpeg_subsample);
-  ESP_LOGI(TAG_IMAGE, "   MCU pixels: %d", jpeg_mcu_pixels);
   
   // Valider les dimensions
   if (detected_width <= 0 || detected_height <= 0 || 
@@ -481,14 +478,21 @@ bool SdImageComponent::decode_jpeg_real(const std::vector<uint8_t> &jpeg_data) {
     this->height_ = detected_height;
   }
   
-  // Allouer le buffer de sortie
+  // Allouer le buffer de sortie de manière sécurisée
   size_t output_size = this->calculate_output_size();
   ESP_LOGI(TAG_IMAGE, "💾 Allocating %zu bytes for decoded image", output_size);
   
-  try {
-    this->image_data_.resize(output_size, 0); // Initialiser à zéro
-  } catch (const std::bad_alloc &e) {
-    ESP_LOGE(TAG_IMAGE, "❌ Failed to allocate memory for image: %zu bytes", output_size);
+  // Vérifier si on a assez de mémoire (simple check)
+  if (output_size > 2 * 1024 * 1024) { // Plus de 2MB
+    ESP_LOGW(TAG_IMAGE, "⚠️ Large memory allocation requested: %zu bytes", output_size);
+  }
+  
+  // Allocation simple sans exception handling
+  this->image_data_.resize(output_size, 0); // Initialiser à zéro
+  
+  if (this->image_data_.size() != output_size) {
+    ESP_LOGE(TAG_IMAGE, "❌ Failed to allocate memory for image: requested %zu, got %zu", 
+             output_size, this->image_data_.size());
     jpeg.close();
     return false;
   }
