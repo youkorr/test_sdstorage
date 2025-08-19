@@ -8,19 +8,12 @@
 #include "esphome/core/component.h"
 #include "esphome/core/automation.h"
 #include "esphome/core/optional.h"
-#include "esphome/core/application.h"
 #include "esphome/components/image/image.h"
 #include "esphome/components/display/display.h"
 #include "../sd_mmc_card/sd_mmc_card.h"
 
 // Décodeurs d'images - Toujours inclure JPEGDEC
 #include <JPEGDEC.h>
-
-// Includes pour ESP-IDF
-#include <freertos/FreeRTOS.h>
-#include <freertos/task.h>
-#include <esp_task_wdt.h>
-#include <esp_timer.h>
 
 // Définir la version si pas définie
 #ifndef JPEGDEC_VERSION
@@ -198,7 +191,7 @@ class SdImageComponent : public Component, public image::Image {
   bool is_loaded_{false};
   std::vector<uint8_t> image_data_;
   StorageComponent *storage_component_{nullptr};
-
+  
  private:
   // ===== FILE TYPE DETECTION =====
   bool is_jpeg_file(const std::vector<uint8_t> &data) const;
@@ -212,37 +205,6 @@ class SdImageComponent : public Component, public image::Image {
   // ===== VRAIS DÉCODEURS D'IMAGES =====
   bool decode_jpeg_real(const std::vector<uint8_t> &jpeg_data);
   bool decode_png_real(const std::vector<uint8_t> &png_data);
-  
-  // ===== DÉCODEURS SPÉCIALISÉS PAR TAILLE =====
-  bool decode_jpeg_small_screen(const std::vector<uint8_t> &jpeg_data);
-  bool decode_jpeg_medium_screen(const std::vector<uint8_t> &jpeg_data);
-  bool decode_jpeg_large_screen(const std::vector<uint8_t> &jpeg_data);
-  bool decode_jpeg_ultra_large(const std::vector<uint8_t> &jpeg_data);
-  
-  // ===== MICRO-TILES ULTRA-SÉCURISÉES =====
-  bool decode_with_micro_tiles(const std::vector<uint8_t> &jpeg_data, int tile_size);
-  bool decode_ultra_safe_tile(const std::vector<uint8_t> &jpeg_data, 
-                             int tile_x, int tile_y, int tile_w, int tile_h);
-  
-  // ===== DÉCODAGE PAR TILES (LEGACY) =====
-  bool decode_jpeg_tiled(const std::vector<uint8_t> &jpeg_data);
-  bool decode_jpeg_tile(const std::vector<uint8_t> &jpeg_data, int tile_x, int tile_y, int tile_w, int tile_h);
-  bool decode_jpeg_safe_tiles(const std::vector<uint8_t> &jpeg_data);
-  bool decode_single_tile_safe(const std::vector<uint8_t> &jpeg_data, 
-                               int tile_x, int tile_y, int tile_w, int tile_h);
-  
-  static int tile_callback_wrapper(JPEGDRAW *pDraw);
-  
-  // ===== CONTEXTE GLOBAL POUR TILES =====
-  struct TileContext {
-    SdImageComponent *instance;
-    int tile_x;
-    int tile_y; 
-    int tile_w;
-    int tile_h;
-    bool active;
-  };
-  static TileContext g_tile_context;
   
   // ===== FALLBACK DÉCODEURS (patterns de test) =====
   bool decode_jpeg_fallback(const std::vector<uint8_t> &jpeg_data);
