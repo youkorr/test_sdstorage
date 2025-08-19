@@ -248,6 +248,20 @@ class SdImageComponent : public Component, public image::Image {
   }
   
   void list_directory_contents(const std::string &dir_path);
+  
+  // ===== NOUVELLES MÉTHODES DE DEBUG ET GESTION MÉMOIRE =====
+  
+  // Gestion mémoire améliorée
+  bool allocate_image_buffer(size_t size);
+  
+  // Décodeurs simplifiés pour debug
+  bool decode_jpeg_simple(const std::vector<uint8_t> &jpeg_data);
+  
+  // Méthodes de diagnostic et debug
+  void debug_memory_usage();
+  bool test_minimal_allocation();
+  bool load_image_debug_safe();
+  void run_diagnostics();
 };
 
 // =====================================================
