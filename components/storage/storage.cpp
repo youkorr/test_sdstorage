@@ -372,16 +372,22 @@ bool SdImageComponent::decode_jpeg_real(const std::vector<uint8_t> &jpeg_data) {
   
   JPEGDEC jpeg;
   
-  // Callback pour récupérer les pixels décodés
+  // Variables statiques pour le callback
   static std::vector<uint8_t> *target_buffer = nullptr;
   static int target_width = 0;
   static int target_height = 0;
+  static OutputImageFormat target_format = OutputImageFormat::rgb565;
+  static ByteOrder target_byte_order = ByteOrder::little_endian;
+  static SdImageComponent *current_instance = nullptr;
   
-  // Lambda function pour le callback de décodage
+  // Callback pour récupérer les pixels décodés
   auto draw_callback = [](JPEGDRAW *pDraw) -> int {
-    if (!target_buffer || !pDraw) return 0;
+    if (!target_buffer || !pDraw || !current_instance) return 0;
     
-    // Copier les pixels RGB888 dans notre buffer
+    ESP_LOGV(TAG_IMAGE, "Draw callback: x=%d, y=%d, w=%d, h=%d", 
+             pDraw->x, pDraw->y, pDraw->iWidth, pDraw->iHeight);
+    
+    // Copier les pixels RGB888 et les convertir au format cible
     int y_start = pDraw->y;
     int x_start = pDraw->x;
     int width = pDraw->iWidth;
@@ -390,70 +396,137 @@ bool SdImageComponent::decode_jpeg_real(const std::vector<uint8_t> &jpeg_data) {
     for (int y = 0; y < height; y++) {
       for (int x = 0; x < width; x++) {
         int src_offset = (y * width + x) * 3;
-        int dst_offset = ((y_start + y) * target_width + (x_start + x)) * 3;
         
-        if (dst_offset + 2 < target_buffer->size()) {
-          (*target_buffer)[dst_offset + 0] = pDraw->pPixels[src_offset + 0]; // R
-          (*target_buffer)[dst_offset + 1] = pDraw->pPixels[src_offset + 1]; // G
-          (*target_buffer)[dst_offset + 2] = pDraw->pPixels[src_offset + 2]; // B
-        }
+        // Vérifier les limites
+        if (src_offset + 2 >= pDraw->iWidth * pDraw->iHeight * 3) continue;
+        if ((y_start + y) >= target_height || (x_start + x) >= target_width) continue;
+        
+        uint8_t r = pDraw->pPixels[src_offset + 0];
+        uint8_t g = pDraw->pPixels[src_offset + 1]; 
+        uint8_t b = pDraw->pPixels[src_offset + 2];
+        
+        size_t pixel_offset = current_instance->get_pixel_offset(x_start + x, y_start + y);
+        current_instance->set_pixel_at_offset(pixel_offset, r, g, b, 255);
       }
     }
     return 1;
   };
   
-  // Ouvrir le JPEG avec callback
+  // Ouvrir le JPEG depuis la mémoire
   if (jpeg.openRAM((uint8_t*)jpeg_data.data(), jpeg_data.size(), draw_callback) != 1) {
     ESP_LOGE(TAG_IMAGE, "❌ Failed to open JPEG with JPEGDEC");
     return false;
   }
   
   // Récupérer les dimensions
-  this->width_ = jpeg.getWidth();
-  this->height_ = jpeg.getHeight();
+  int detected_width = jpeg.getWidth();
+  int detected_height = jpeg.getHeight();
   
-  ESP_LOGI(TAG_IMAGE, "📏 JPEG dimensions: %dx%d", this->width_, this->height_);
+  ESP_LOGI(TAG_IMAGE, "📏 JPEG dimensions from JPEGDEC: %dx%d", detected_width, detected_height);
   
   // Valider les dimensions
-  if (this->width_ <= 0 || this->height_ <= 0 || 
-      this->width_ > 2048 || this->height_ > 2048) {
-    ESP_LOGE(TAG_IMAGE, "❌ Invalid JPEG dimensions: %dx%d", this->width_, this->height_);
+  if (detected_width <= 0 || detected_height <= 0 || 
+      detected_width > 4096 || detected_height > 4096) {
+    ESP_LOGE(TAG_IMAGE, "❌ Invalid JPEG dimensions: %dx%d", detected_width, detected_height);
     jpeg.close();
     return false;
   }
   
-  // Allouer le buffer temporaire pour RGB888
-  std::vector<uint8_t> rgb_buffer(this->width_ * this->height_ * 3);
-  
-  // Configurer les variables statiques pour le callback
-  target_buffer = &rgb_buffer;
-  target_width = this->width_;
-  target_height = this->height_;
-  
-  ESP_LOGI(TAG_IMAGE, "🔄 Decoding JPEG with callback...");
-  
-  // Décoder l'image (le callback sera appelé automatiquement)
-  if (jpeg.decode(0, 0, 0) != 1) {
-    ESP_LOGE(TAG_IMAGE, "❌ Failed to decode JPEG");
-    jpeg.close();
-    target_buffer = nullptr;
-    return false;
+  // Si les dimensions n'étaient pas définies, les utiliser
+  if (this->width_ <= 0 || this->height_ <= 0) {
+    this->width_ = detected_width;
+    this->height_ = detected_height;
+    ESP_LOGI(TAG_IMAGE, "📐 Using detected dimensions: %dx%d", this->width_, this->height_);
+  } else if (this->width_ != detected_width || this->height_ != detected_height) {
+    ESP_LOGW(TAG_IMAGE, "⚠️ Dimension mismatch: configured %dx%d vs detected %dx%d", 
+             this->width_, this->height_, detected_width, detected_height);
+    // Utiliser les dimensions détectées
+    this->width_ = detected_width;
+    this->height_ = detected_height;
   }
   
-  jpeg.close();
-  target_buffer = nullptr;
-  
-  // Allouer le buffer de sortie dans le format cible
+  // Allouer le buffer de sortie
   size_t output_size = this->calculate_output_size();
   this->image_data_.resize(output_size);
-  ESP_LOGI(TAG_IMAGE, "💾 Allocated %zu bytes for decoded image", output_size);
+  ESP_LOGI(TAG_IMAGE, "💾 Allocated %zu bytes for decoded image (%s)", 
+           output_size, this->get_output_format_string().c_str());
   
-  // Convertir du RGB888 vers le format cible
-  ESP_LOGI(TAG_IMAGE, "🔄 Converting RGB888 to %s...", this->get_output_format_string().c_str());
-  this->convert_rgb888_to_target(rgb_buffer.data(), this->width_ * this->height_);
+  // Configurer les variables statiques pour le callback
+  target_buffer = &this->image_data_;
+  target_width = this->width_;
+  target_height = this->height_;
+  target_format = this->output_format_;
+  target_byte_order = this->byte_order_;
+  current_instance = this;
   
-  ESP_LOGI(TAG_IMAGE, "✅ JPEG decoding complete");
+  ESP_LOGI(TAG_IMAGE, "🔄 Starting JPEG decode with callback...");
+  
+  // Décoder l'image (le callback sera appelé automatiquement)
+  int decode_result = jpeg.decode(0, 0, 0);
+  
+  // Nettoyer
+  jpeg.close();
+  target_buffer = nullptr;
+  current_instance = nullptr;
+  
+  if (decode_result != 1) {
+    ESP_LOGE(TAG_IMAGE, "❌ JPEGDEC decode failed with result: %d", decode_result);
+    return false;
+  }
+  
+  ESP_LOGI(TAG_IMAGE, "✅ JPEG decoding complete with JPEGDEC");
   return true;
+}
+
+// =====================================================
+// MÉTHODE DE SÉLECTION DU DÉCODEUR - Version corrigée
+// =====================================================
+
+bool SdImageComponent::decode_jpeg(const std::vector<uint8_t> &jpeg_data) {
+  // Essayer d'abord le vrai décodeur JPEGDEC
+  ESP_LOGI(TAG_IMAGE, "🔧 Attempting to use JPEGDEC library...");
+  
+  try {
+    bool result = this->decode_jpeg_real(jpeg_data);
+    if (result) {
+      ESP_LOGI(TAG_IMAGE, "✅ JPEGDEC decoding successful");
+      return true;
+    } else {
+      ESP_LOGW(TAG_IMAGE, "⚠️ JPEGDEC decoding failed, trying fallback");
+    }
+  } catch (const std::exception &e) {
+    ESP_LOGE(TAG_IMAGE, "❌ JPEGDEC threw exception: %s", e.what());
+  } catch (...) {
+    ESP_LOGE(TAG_IMAGE, "❌ JPEGDEC threw unknown exception");
+  }
+  
+  // Si JPEGDEC échoue, utiliser le fallback
+  ESP_LOGW(TAG_IMAGE, "🔄 Falling back to test pattern decoder");
+  return this->decode_jpeg_fallback(jpeg_data);
+}
+
+// =====================================================
+// VÉRIFICATION DE LA DISPONIBILITÉ DE JPEGDEC
+// =====================================================
+
+void SdImageComponent::setup() {
+  ESP_LOGCONFIG(TAG_IMAGE, "Setting up SD Image Component...");
+  ESP_LOGCONFIG(TAG_IMAGE, "  File path: %s", this->file_path_.c_str());
+  ESP_LOGCONFIG(TAG_IMAGE, "  Dimensions: %dx%d", this->width_, this->height_);
+  ESP_LOGCONFIG(TAG_IMAGE, "  Format: %s", this->get_output_format_string().c_str());
+  ESP_LOGCONFIG(TAG_IMAGE, "  Byte order: %s", this->get_byte_order_string().c_str());
+  ESP_LOGCONFIG(TAG_IMAGE, "  Storage component: %s", this->storage_component_ ? "configured" : "not configured");
+  
+  // Vérifier la disponibilité de JPEGDEC
+  ESP_LOGCONFIG(TAG_IMAGE, "  JPEGDEC version: %s", JPEGDEC_VERSION);
+  ESP_LOGCONFIG(TAG_IMAGE, "  Real JPEG decoder: AVAILABLE");
+  ESP_LOGCONFIG(TAG_IMAGE, "  PNG decoder: FALLBACK ONLY");
+  
+  // Auto-load image if path is specified
+  if (!this->file_path_.empty() && this->storage_component_) {
+    ESP_LOGI(TAG_IMAGE, "Auto-loading image from: %s", this->file_path_.c_str());
+    this->load_image();
+  }
 }
 
 // =====================================================
