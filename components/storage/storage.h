@@ -8,12 +8,19 @@
 #include "esphome/core/component.h"
 #include "esphome/core/automation.h"
 #include "esphome/core/optional.h"
+#include "esphome/core/application.h"
 #include "esphome/components/image/image.h"
 #include "esphome/components/display/display.h"
 #include "../sd_mmc_card/sd_mmc_card.h"
 
 // Décodeurs d'images - Toujours inclure JPEGDEC
 #include <JPEGDEC.h>
+
+// Includes pour ESP-IDF
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <esp_task_wdt.h>
+#include <esp_timer.h>
 
 // Définir la version si pas définie
 #ifndef JPEGDEC_VERSION
@@ -223,6 +230,7 @@ class SdImageComponent : public Component, public image::Image {
   bool decode_jpeg_safe_tiles(const std::vector<uint8_t> &jpeg_data);
   bool decode_single_tile_safe(const std::vector<uint8_t> &jpeg_data, 
                                int tile_x, int tile_y, int tile_w, int tile_h);
+  
   static int tile_callback_wrapper(JPEGDRAW *pDraw);
   
   // ===== CONTEXTE GLOBAL POUR TILES =====
@@ -339,6 +347,7 @@ class SdImageUnloadAction : public Action<Ts...> {
 
 }  // namespace storage
 }  // namespace esphome
+
 
 
 
