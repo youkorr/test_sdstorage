@@ -4,6 +4,11 @@
 #include <dirent.h>
 #include <errno.h>
 #include <algorithm>
+#include <cstdlib>          // pour malloc/free
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>   // pour uxTaskGetStackHighWaterMark
+#include <esp_heap_caps.h>   // pour heap_caps_malloc, heap_caps_get_free_size
+#include <esp_system.h>      // pour esp_get_free_heap_size
 
 namespace esphome {
 namespace storage {
