@@ -327,3 +327,4 @@ class SdImageUnloadAction : public Action<Ts...> {
 }  // namespace esphome
 
 
+
