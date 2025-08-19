@@ -91,7 +91,7 @@ size_t StorageComponent::get_file_size(const std::string &path) {
 }
 
 // =====================================================
-// SdImageComponent Implementation - Compatible ESPHome
+// SdImageComponent Implementation - Fixed ESPHome compatibility
 // =====================================================
 
 void SdImageComponent::setup() {
@@ -194,7 +194,7 @@ void SdImageComponent::unload_image() {
   this->is_loaded_ = false;
   
   // Reset the base Image class to empty state
-  this->update_image_properties(nullptr, 0, 0, image::IMAGE_TYPE_RGB565, image::TRANSPARENCY_OPAQUE);
+  this->update_image_properties(0, 0, image::IMAGE_TYPE_RGB565);
   
   ESP_LOGI(TAG_IMAGE, "✅ Image unloaded");
 }
@@ -360,7 +360,7 @@ bool SdImageComponent::process_image_with_pil_simulation(const std::vector<uint8
     case image::IMAGE_TYPE_RGB565:
       data_size = width * height * 2;
       break;
-    case image::IMAGE_TYPE_RGB:
+    case image::IMAGE_TYPE_RGB24:
       data_size = width * height * 3;
       break;
     default:
@@ -395,7 +395,7 @@ bool SdImageComponent::process_image_with_pil_simulation(const std::vector<uint8
   this->generate_gradient_pattern(width, height);
   
   // Mettre à jour les propriétés de l'image ESPHome
-  this->update_image_properties(this->image_data_.data(), width, height, detected_type, image::TRANSPARENCY_OPAQUE);
+  this->update_image_properties(width, height, detected_type);
   
   ESP_LOGI(TAG_IMAGE, "✅ Image processed successfully");
   return true;
