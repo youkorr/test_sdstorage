@@ -569,7 +569,8 @@ bool SdImageComponent::decode_jpeg_real(const std::vector<uint8_t> &jpeg_data) {
 }
 
 // Global context pointer (declared in .h file or at top of .cpp)
-DecodeContext* g_decode_context = nullptr;
+JpegDecodeContext* g_decode_context = nullptr;
+
 
 // Alternative approach: Process JPEG in smaller tiles to reduce memory pressure
 bool SdImageComponent::decode_jpeg_tiled(const std::vector<uint8_t> &jpeg_data) {
