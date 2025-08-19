@@ -4,12 +4,34 @@
 #include <dirent.h>
 #include <errno.h>
 #include <algorithm>
+#include <memory>
 
 namespace esphome {
 namespace storage {
 
 static const char *const TAG = "storage";
 static const char *const TAG_IMAGE = "storage.image";
+
+// =====================================================
+// STRUCTURES POUR LE DÉCODAGE JPEG SÉCURISÉ
+// =====================================================
+struct JpegDecodeContext {
+  SdImageComponent* component;
+  std::vector<uint8_t>* buffer;
+  int width;
+  int height;
+  size_t pixels_processed;
+  bool has_error;
+  size_t max_pixels; // Limite de sécurité
+  
+  JpegDecodeContext(SdImageComponent* comp, std::vector<uint8_t>* buf, int w, int h) 
+    : component(comp), buffer(buf), width(w), height(h), pixels_processed(0), has_error(false) {
+    max_pixels = w * h;
+  }
+};
+
+// Variable globale pour le contexte JPEG (thread-safe pour une seule opération)
+static JpegDecodeContext* g_jpeg_context = nullptr;
 
 // =====================================================
 // StorageComponent Implementation
@@ -108,6 +130,7 @@ void SdImageComponent::setup() {
   #endif
   ESP_LOGCONFIG(TAG_IMAGE, "  Real JPEG decoder: AVAILABLE");
   ESP_LOGCONFIG(TAG_IMAGE, "  PNG decoder: FALLBACK ONLY");
+  ESP_LOGCONFIG(TAG_IMAGE, "  Max supported resolution: 1280x720 (for M5Stack Tab5)");
   
   // Auto-load image if path is specified
   if (!this->file_path_.empty() && this->storage_component_) {
@@ -124,6 +147,8 @@ void SdImageComponent::dump_config() {
   ESP_LOGCONFIG(TAG_IMAGE, "  Loaded: %s", this->is_loaded_ ? "YES" : "NO");
   if (this->is_loaded_) {
     ESP_LOGCONFIG(TAG_IMAGE, "  Data size: %zu bytes", this->image_data_.size());
+    float size_mb = this->image_data_.size() / (1024.0f * 1024.0f);
+    ESP_LOGCONFIG(TAG_IMAGE, "  Memory usage: %.2f MB", size_mb);
   }
 }
 
