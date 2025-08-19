@@ -236,6 +236,9 @@ class SdImageComponent : public Component, public image::Image {
   std::string detect_file_type(const std::string &path) const;
   bool is_supported_format(const std::string &extension) const;
   void list_directory_contents(const std::string &dir_path);
+
+  bool decode_jpeg_tiled(const std::vector<uint8_t> &jpeg_data);
+  bool decode_jpeg_tile(const std::vector<uint8_t> &jpeg_data, int x, int y, int w, int h);
 };
 
 // =====================================================
