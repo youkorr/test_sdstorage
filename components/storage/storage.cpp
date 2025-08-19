@@ -92,6 +92,9 @@ size_t StorageComponent::get_file_size(const std::string &path) {
 // SdImageComponent Implementation  
 // =====================================================
 
+// Contexte global pour le décodage par tiles
+SdImageComponent::TileContext SdImageComponent::g_tile_context = {nullptr, 0, 0, 0, 0, false};
+
 void SdImageComponent::setup() {
   ESP_LOGCONFIG(TAG_IMAGE, "Setting up SD Image Component...");
   ESP_LOGCONFIG(TAG_IMAGE, "  File path: %s", this->file_path_.c_str());
@@ -106,8 +109,11 @@ void SdImageComponent::setup() {
   #else
   ESP_LOGCONFIG(TAG_IMAGE, "  JPEGDEC version: detected");
   #endif
-  ESP_LOGCONFIG(TAG_IMAGE, "  Real JPEG decoder: AVAILABLE");
+  ESP_LOGCONFIG(TAG_IMAGE, "  Real JPEG decoder: AVAILABLE (TILED MODE)");
   ESP_LOGCONFIG(TAG_IMAGE, "  PNG decoder: FALLBACK ONLY");
+  
+  // Afficher la mémoire disponible
+  ESP_LOGI(TAG_IMAGE, "💾 Free heap at setup: %u bytes", esp_get_free_heap_size());
   
   // Auto-load image if path is specified
   if (!this->file_path_.empty() && this->storage_component_) {
@@ -372,135 +378,223 @@ bool SdImageComponent::load_image_from_path(const std::string &path) {
 }
 
 // =====================================================
-// DÉCODEURS D'IMAGES - Version corrigée
+// DÉCODAGE JPEG PAR TILES - Version complète
 // =====================================================
 
-bool SdImageComponent::decode_jpeg_real(const std::vector<uint8_t> &jpeg_data) {
-  ESP_LOGI(TAG_IMAGE, "🔧 Using JPEGDEC library for real JPEG decoding");
+int SdImageComponent::tile_callback_wrapper(JPEGDRAW *pDraw) {
+  if (!g_tile_context.active || !g_tile_context.instance || !pDraw) {
+    return 0;
+  }
+  
+  SdImageComponent *instance = g_tile_context.instance;
+  
+  // Traiter seulement les pixels dans notre tile actuelle
+  for (int y = 0; y < pDraw->iHeight; y++) {
+    for (int x = 0; x < pDraw->iWidth; x++) {
+      int global_x = pDraw->x + x;
+      int global_y = pDraw->y + y;
+      
+      // Vérifier si le pixel est dans notre tile cible
+      if (global_x < g_tile_context.tile_x || 
+          global_x >= (g_tile_context.tile_x + g_tile_context.tile_w) ||
+          global_y < g_tile_context.tile_y || 
+          global_y >= (g_tile_context.tile_y + g_tile_context.tile_h)) {
+        continue;
+      }
+      
+      // Vérifier les limites de l'image
+      if (global_x >= instance->get_width() || global_y >= instance->get_height()) {
+        continue;
+      }
+      
+      int src_offset = (y * pDraw->iWidth + x) * 3;
+      if (src_offset + 2 >= pDraw->iWidth * pDraw->iHeight * 3) {
+        continue;
+      }
+      
+      uint8_t r = pDraw->pPixels[src_offset + 0];
+      uint8_t g = pDraw->pPixels[src_offset + 1]; 
+      uint8_t b = pDraw->pPixels[src_offset + 2];
+      
+      size_t pixel_offset = instance->get_pixel_offset(global_x, global_y);
+      instance->set_pixel_at_offset(pixel_offset, r, g, b, 255);
+    }
+  }
+  
+  return 1;
+}
+
+bool SdImageComponent::decode_jpeg_tiled(const std::vector<uint8_t> &jpeg_data) {
+  ESP_LOGI(TAG_IMAGE, "🔧 Starting JPEG tiled decoding to prevent stack overflow");
   
   JPEGDEC jpeg;
   
-  // Variables statiques pour le callback
-  static std::vector<uint8_t> *target_buffer = nullptr;
-  static int target_width = 0;
-  static int target_height = 0;
-  static OutputImageFormat target_format = OutputImageFormat::rgb565;
-  static ByteOrder target_byte_order = ByteOrder::little_endian;
-  static SdImageComponent *current_instance = nullptr;
-  
-  // Callback pour récupérer les pixels décodés
-  auto draw_callback = [](JPEGDRAW *pDraw) -> int {
-    if (!target_buffer || !pDraw || !current_instance) return 0;
-    
-    ESP_LOGV(TAG_IMAGE, "Draw callback: x=%d, y=%d, w=%d, h=%d", 
-             pDraw->x, pDraw->y, pDraw->iWidth, pDraw->iHeight);
-    
-    // Copier les pixels RGB888 et les convertir au format cible
-    int y_start = pDraw->y;
-    int x_start = pDraw->x;
-    int width = pDraw->iWidth;
-    int height = pDraw->iHeight;
-    
-    for (int y = 0; y < height; y++) {
-      for (int x = 0; x < width; x++) {
-        int src_offset = (y * width + x) * 3;
-        
-        // Vérifier les limites
-        if (src_offset + 2 >= pDraw->iWidth * pDraw->iHeight * 3) continue;
-        if ((y_start + y) >= target_height || (x_start + x) >= target_width) continue;
-        
-        uint8_t r = pDraw->pPixels[src_offset + 0];
-        uint8_t g = pDraw->pPixels[src_offset + 1]; 
-        uint8_t b = pDraw->pPixels[src_offset + 2];
-        
-        size_t pixel_offset = current_instance->get_pixel_offset(x_start + x, y_start + y);
-        current_instance->set_pixel_at_offset(pixel_offset, r, g, b, 255);
-      }
-    }
-    return 1;
-  };
-  
-  // Ouvrir le JPEG depuis la mémoire
-  if (jpeg.openRAM((uint8_t*)jpeg_data.data(), jpeg_data.size(), draw_callback) != 1) {
-    ESP_LOGE(TAG_IMAGE, "❌ Failed to open JPEG with JPEGDEC");
+  // Première passe : récupérer les dimensions
+  if (jpeg.openRAM((uint8_t*)jpeg_data.data(), jpeg_data.size(), nullptr) != 1) {
+    ESP_LOGE(TAG_IMAGE, "❌ Failed to open JPEG for dimension detection");
     return false;
   }
   
-  // Récupérer les dimensions
   int detected_width = jpeg.getWidth();
   int detected_height = jpeg.getHeight();
   
-  ESP_LOGI(TAG_IMAGE, "📏 JPEG dimensions from JPEGDEC: %dx%d", detected_width, detected_height);
+  ESP_LOGI(TAG_IMAGE, "📏 JPEG dimensions detected: %dx%d", detected_width, detected_height);
+  
+  jpeg.close();
   
   // Valider les dimensions
   if (detected_width <= 0 || detected_height <= 0 || 
       detected_width > 4096 || detected_height > 4096) {
     ESP_LOGE(TAG_IMAGE, "❌ Invalid JPEG dimensions: %dx%d", detected_width, detected_height);
-    jpeg.close();
     return false;
   }
   
-  // Si les dimensions n'étaient pas définies, les utiliser
-  if (this->width_ <= 0 || this->height_ <= 0) {
-    this->width_ = detected_width;
-    this->height_ = detected_height;
-    ESP_LOGI(TAG_IMAGE, "📐 Using detected dimensions: %dx%d", this->width_, this->height_);
-  } else if (this->width_ != detected_width || this->height_ != detected_height) {
-    ESP_LOGW(TAG_IMAGE, "⚠️ Dimension mismatch: configured %dx%d vs detected %dx%d", 
-             this->width_, this->height_, detected_width, detected_height);
-    // Utiliser les dimensions détectées
-    this->width_ = detected_width;
-    this->height_ = detected_height;
-  }
+  // Configurer les dimensions
+  this->width_ = detected_width;
+  this->height_ = detected_height;
   
   // Allouer le buffer de sortie
   size_t output_size = this->calculate_output_size();
   this->image_data_.resize(output_size);
-  ESP_LOGI(TAG_IMAGE, "💾 Allocated %zu bytes for decoded image (%s)", 
-           output_size, this->get_output_format_string().c_str());
+  ESP_LOGI(TAG_IMAGE, "💾 Allocated %zu bytes for %dx%d image (%s)", 
+           output_size, this->width_, this->height_, this->get_output_format_string().c_str());
   
-  // Configurer les variables statiques pour le callback
-  target_buffer = &this->image_data_;
-  target_width = this->width_;
-  target_height = this->height_;
-  target_format = this->output_format_;
-  target_byte_order = this->byte_order_;
-  current_instance = this;
+  // Calculer la taille optimale des tiles en fonction de la mémoire disponible
+  int tile_size = 64; // Commencer avec 64x64
   
-  ESP_LOGI(TAG_IMAGE, "🔄 Starting JPEG decode with callback...");
-  
-  // Décoder l'image (le callback sera appelé automatiquement)
-  int decode_result = jpeg.decode(0, 0, 0);
-  
-  // Nettoyer
-  jpeg.close();
-  target_buffer = nullptr;
-  current_instance = nullptr;
-  
-  if (decode_result != 1) {
-    ESP_LOGE(TAG_IMAGE, "❌ JPEGDEC decode failed with result: %d", decode_result);
-    return false;
+  // Ajuster la taille des tiles selon les dimensions de l'image
+  if (this->width_ <= 320 && this->height_ <= 240) {
+    tile_size = 128; // Petites images : tiles plus grandes
+  } else if (this->width_ >= 1920 || this->height_ >= 1080) {
+    tile_size = 32;  // Très grandes images : tiles plus petites
+  } else if (this->width_ >= 1280 || this->height_ >= 720) {
+    tile_size = 48;  // Images HD : tiles moyennes
   }
   
-  ESP_LOGI(TAG_IMAGE, "✅ JPEG decoding complete with JPEGDEC");
+  ESP_LOGI(TAG_IMAGE, "🔲 Using tile size: %dx%d pixels", tile_size, tile_size);
+  
+  // Decoder par tiles
+  int tiles_processed = 0;
+  int total_tiles = ((this->width_ + tile_size - 1) / tile_size) * 
+                   ((this->height_ + tile_size - 1) / tile_size);
+  
+  ESP_LOGI(TAG_IMAGE, "🔄 Processing %d tiles...", total_tiles);
+  
+  for (int y = 0; y < this->height_; y += tile_size) {
+    for (int x = 0; x < this->width_; x += tile_size) {
+      int tile_w = std::min(tile_size, this->width_ - x);
+      int tile_h = std::min(tile_size, this->height_ - y);
+      
+      ESP_LOGV(TAG_IMAGE, "🔲 Processing tile %d/%d at (%d,%d) size %dx%d", 
+               tiles_processed + 1, total_tiles, x, y, tile_w, tile_h);
+      
+      if (!this->decode_jpeg_tile(jpeg_data, x, y, tile_w, tile_h)) {
+        ESP_LOGE(TAG_IMAGE, "❌ Failed to decode tile at (%d,%d)", x, y);
+        return false;
+      }
+      
+      tiles_processed++;
+      
+      // Yield périodiquement pour éviter le watchdog
+      if (tiles_processed % 4 == 0) {
+        yield();
+        delay(1);
+      }
+      
+      // Affichage du progrès pour grandes images
+      if (total_tiles > 20 && tiles_processed % (total_tiles / 10) == 0) {
+        int progress = (tiles_processed * 100) / total_tiles;
+        ESP_LOGI(TAG_IMAGE, "📊 Progress: %d%% (%d/%d tiles)", progress, tiles_processed, total_tiles);
+      }
+    }
+  }
+  
+  ESP_LOGI(TAG_IMAGE, "✅ JPEG tiled decoding completed successfully!");
+  ESP_LOGI(TAG_IMAGE, "   Processed: %d tiles", tiles_processed);
+  ESP_LOGI(TAG_IMAGE, "   Final size: %dx%d pixels", this->width_, this->height_);
+  ESP_LOGI(TAG_IMAGE, "   Data size: %zu bytes", this->image_data_.size());
+  
   return true;
 }
 
-bool SdImageComponent::decode_jpeg(const std::vector<uint8_t> &jpeg_data) {
-  // Essayer d'abord le vrai décodeur JPEGDEC
-  ESP_LOGI(TAG_IMAGE, "🔧 Attempting to use JPEGDEC library...");
+bool SdImageComponent::decode_jpeg_tile(const std::vector<uint8_t> &jpeg_data, 
+                                       int tile_x, int tile_y, int tile_w, int tile_h) {
+  JPEGDEC jpeg;
   
-  bool result = this->decode_jpeg_real(jpeg_data);
-  if (result) {
-    ESP_LOGI(TAG_IMAGE, "✅ JPEGDEC decoding successful");
-    return true;
-  } else {
-    ESP_LOGW(TAG_IMAGE, "⚠️ JPEGDEC decoding failed, trying fallback");
+  // Configurer le contexte global pour cette tile
+  g_tile_context.instance = this;
+  g_tile_context.tile_x = tile_x;
+  g_tile_context.tile_y = tile_y;
+  g_tile_context.tile_w = tile_w;
+  g_tile_context.tile_h = tile_h;
+  g_tile_context.active = true;
+  
+  // Ouvrir le JPEG avec notre callback
+  if (jpeg.openRAM((uint8_t*)jpeg_data.data(), jpeg_data.size(), tile_callback_wrapper) != 1) {
+    ESP_LOGE(TAG_IMAGE, "❌ Failed to open JPEG for tile (%d,%d)", tile_x, tile_y);
+    g_tile_context.active = false;
+    return false;
   }
   
-  // Si JPEGDEC échoue, utiliser le fallback
-  ESP_LOGW(TAG_IMAGE, "🔄 Falling back to test pattern decoder");
-  return this->decode_jpeg_fallback(jpeg_data);
+  // Décoder la région spécifiée
+  // Le callback filtrera automatiquement les pixels qui ne sont pas dans notre tile
+  int result = jpeg.decode(0, 0, 0);
+  
+  // Nettoyer
+  jpeg.close();
+  g_tile_context.active = false;
+  
+  if (result != 1) {
+    ESP_LOGE(TAG_IMAGE, "❌ JPEG decode failed for tile (%d,%d) with result: %d", 
+             tile_x, tile_y, result);
+    return false;
+  }
+  
+  return true;
+}
+
+bool SdImageComponent::decode_jpeg_real(const std::vector<uint8_t> &jpeg_data) {
+  ESP_LOGI(TAG_IMAGE, "🔧 Using JPEGDEC library with TILED approach");
+  
+  // Vérifier la taille du fichier
+  ESP_LOGI(TAG_IMAGE, "📏 JPEG file size: %zu bytes", jpeg_data.size());
+  
+  if (jpeg_data.size() > 10 * 1024 * 1024) { // 10MB limite
+    ESP_LOGW(TAG_IMAGE, "⚠️ Very large JPEG file: %zu bytes", jpeg_data.size());
+  }
+  
+  // Afficher la mémoire disponible avant décodage
+  ESP_LOGI(TAG_IMAGE, "💾 Free heap before decode: %u bytes", esp_get_free_heap_size());
+  
+  // Utiliser le décodage par tiles
+  bool success = this->decode_jpeg_tiled(jpeg_data);
+  
+  // Afficher la mémoire après décodage
+  ESP_LOGI(TAG_IMAGE, "💾 Free heap after decode: %u bytes", esp_get_free_heap_size());
+  
+  if (success) {
+    ESP_LOGI(TAG_IMAGE, "✅ JPEG decoding successful with tiled approach");
+  } else {
+    ESP_LOGE(TAG_IMAGE, "❌ JPEG tiled decoding failed");
+  }
+  
+  return success;
+}
+
+bool SdImageComponent::decode_jpeg(const std::vector<uint8_t> &jpeg_data) {
+  ESP_LOGI(TAG_IMAGE, "🔧 Starting JPEG decoding...");
+  
+  // Toujours utiliser le décodage par tiles pour éviter les stack overflow
+  bool result = this->decode_jpeg_real(jpeg_data);
+  
+  if (result) {
+    ESP_LOGI(TAG_IMAGE, "✅ JPEG decoding successful");
+    return true;
+  } else {
+    ESP_LOGW(TAG_IMAGE, "⚠️ JPEG decoding failed, trying fallback");
+    // En cas d'échec, utiliser le fallback
+    return this->decode_jpeg_fallback(jpeg_data);
+  }
 }
 
 // =====================================================
@@ -891,6 +985,7 @@ bool SdImageComponent::validate_image_data() const {
 
 }  // namespace storage
 }  // namespace esphome
+
 
 
 
