@@ -1,6 +1,5 @@
 #include "storage.h"
 #include "esphome/core/log.h"
-#include "esphome/core/application.h"
 #include <sys/stat.h>
 #include <dirent.h>
 #include <errno.h>
@@ -93,9 +92,6 @@ size_t StorageComponent::get_file_size(const std::string &path) {
 // SdImageComponent Implementation  
 // =====================================================
 
-// Contexte global pour le décodage par tiles
-SdImageComponent::TileContext SdImageComponent::g_tile_context = {nullptr, 0, 0, 0, 0, false};
-
 void SdImageComponent::setup() {
   ESP_LOGCONFIG(TAG_IMAGE, "Setting up SD Image Component...");
   ESP_LOGCONFIG(TAG_IMAGE, "  File path: %s", this->file_path_.c_str());
@@ -110,11 +106,8 @@ void SdImageComponent::setup() {
   #else
   ESP_LOGCONFIG(TAG_IMAGE, "  JPEGDEC version: detected");
   #endif
-  ESP_LOGCONFIG(TAG_IMAGE, "  Real JPEG decoder: AVAILABLE (ULTRA-SAFE TILES)");
+  ESP_LOGCONFIG(TAG_IMAGE, "  Real JPEG decoder: AVAILABLE");
   ESP_LOGCONFIG(TAG_IMAGE, "  PNG decoder: FALLBACK ONLY");
-  
-  // Afficher la mémoire disponible
-  ESP_LOGI(TAG_IMAGE, "💾 Free heap at setup: %zu bytes", esp_get_free_heap_size());
   
   // Auto-load image if path is specified
   if (!this->file_path_.empty() && this->storage_component_) {
@@ -379,713 +372,135 @@ bool SdImageComponent::load_image_from_path(const std::string &path) {
 }
 
 // =====================================================
-// DÉCODAGE JPEG ULTRA-OPTIMISÉ POUR GRANDS ÉCRANS
+// DÉCODEURS D'IMAGES - Version corrigée
 // =====================================================
 
-int SdImageComponent::tile_callback_wrapper(JPEGDRAW *pDraw) {
-  if (!g_tile_context.active || !g_tile_context.instance || !pDraw) {
-    return 0;
-  }
-  
-  SdImageComponent *instance = g_tile_context.instance;
-  
-  // Traitement ultra-optimisé sans variables locales sur stack
-  uint8_t *src = pDraw->pPixels;
-  int src_width = pDraw->iWidth;
-  int src_height = pDraw->iHeight;
-  int offset_x = pDraw->x;
-  int offset_y = pDraw->y;
-  
-  int target_width = instance->get_width();
-  int target_height = instance->get_height();
-  
-  for (int y = 0; y < src_height; y++) {
-    int global_y = offset_y + y;
-    if (global_y >= target_height) break;
-    
-    // Vérifier si la ligne est dans notre tile
-    if (global_y < g_tile_context.tile_y || 
-        global_y >= (g_tile_context.tile_y + g_tile_context.tile_h)) {
-      continue;
-    }
-    
-    for (int x = 0; x < src_width; x++) {
-      int global_x = offset_x + x;
-      if (global_x >= target_width) break;
-      
-      // Vérifier si le pixel est dans notre tile
-      if (global_x < g_tile_context.tile_x || 
-          global_x >= (g_tile_context.tile_x + g_tile_context.tile_w)) {
-        continue;
-      }
-      
-      int src_idx = (y * src_width + x) * 3;
-      size_t dst_offset = instance->get_pixel_offset(global_x, global_y);
-      
-      instance->set_pixel_at_offset(dst_offset, 
-        src[src_idx], src[src_idx + 1], src[src_idx + 2], 255);
-    }
-  }
-  
-  return 1;
-}
-
 bool SdImageComponent::decode_jpeg_real(const std::vector<uint8_t> &jpeg_data) {
-  ESP_LOGI(TAG_IMAGE, "🔧 Using ULTRA-SAFE JPEGDEC for large screens");
+  ESP_LOGI(TAG_IMAGE, "🔧 Using JPEGDEC library for real JPEG decoding");
   
-  // Vérifier la mémoire disponible
-  size_t free_heap = esp_get_free_heap_size();
-  ESP_LOGI(TAG_IMAGE, "💾 Free heap before decode: %zu bytes", free_heap);
+  JPEGDEC jpeg;
   
-  if (free_heap < 2 * 1024 * 1024) { // Moins de 2MB libre
-    ESP_LOGW(TAG_IMAGE, "⚠️ Low memory for large image: %zu bytes, using fallback", free_heap);
-    return this->decode_jpeg_fallback(jpeg_data);
-  }
+  // Variables statiques pour le callback
+  static std::vector<uint8_t> *target_buffer = nullptr;
+  static int target_width = 0;
+  static int target_height = 0;
+  static OutputImageFormat target_format = OutputImageFormat::rgb565;
+  static ByteOrder target_byte_order = ByteOrder::little_endian;
+  static SdImageComponent *current_instance = nullptr;
   
-  // Phase 1: Détection des dimensions avec allocation heap
-  JPEGDEC *jpeg_info = new(std::nothrow) JPEGDEC();
-  if (!jpeg_info) {
-    ESP_LOGE(TAG_IMAGE, "❌ Failed to allocate JPEGDEC for info");
+  // Callback pour récupérer les pixels décodés
+  auto draw_callback = [](JPEGDRAW *pDraw) -> int {
+    if (!target_buffer || !pDraw || !current_instance) return 0;
+    
+    ESP_LOGV(TAG_IMAGE, "Draw callback: x=%d, y=%d, w=%d, h=%d", 
+             pDraw->x, pDraw->y, pDraw->iWidth, pDraw->iHeight);
+    
+    // Copier les pixels RGB888 et les convertir au format cible
+    int y_start = pDraw->y;
+    int x_start = pDraw->x;
+    int width = pDraw->iWidth;
+    int height = pDraw->iHeight;
+    
+    for (int y = 0; y < height; y++) {
+      for (int x = 0; x < width; x++) {
+        int src_offset = (y * width + x) * 3;
+        
+        // Vérifier les limites
+        if (src_offset + 2 >= pDraw->iWidth * pDraw->iHeight * 3) continue;
+        if ((y_start + y) >= target_height || (x_start + x) >= target_width) continue;
+        
+        uint8_t r = pDraw->pPixels[src_offset + 0];
+        uint8_t g = pDraw->pPixels[src_offset + 1]; 
+        uint8_t b = pDraw->pPixels[src_offset + 2];
+        
+        size_t pixel_offset = current_instance->get_pixel_offset(x_start + x, y_start + y);
+        current_instance->set_pixel_at_offset(pixel_offset, r, g, b, 255);
+      }
+    }
+    return 1;
+  };
+  
+  // Ouvrir le JPEG depuis la mémoire
+  if (jpeg.openRAM((uint8_t*)jpeg_data.data(), jpeg_data.size(), draw_callback) != 1) {
+    ESP_LOGE(TAG_IMAGE, "❌ Failed to open JPEG with JPEGDEC");
     return false;
   }
   
-  bool success = false;
+  // Récupérer les dimensions
+  int detected_width = jpeg.getWidth();
+  int detected_height = jpeg.getHeight();
   
-  if (jpeg_info->openRAM((uint8_t*)jpeg_data.data(), jpeg_data.size(), nullptr) == 1) {
-    int detected_width = jpeg_info->getWidth();
-    int detected_height = jpeg_info->getHeight();
-    
-    ESP_LOGI(TAG_IMAGE, "📏 JPEG dimensions: %dx%d", detected_width, detected_height);
-    
-    if (detected_width > 0 && detected_height > 0 && 
-        detected_width <= 4096 && detected_height <= 4096) {
-      
-      this->width_ = detected_width;
-      this->height_ = detected_height;
-      
-      // Calculer la mémoire nécessaire
-      size_t output_size = this->calculate_output_size();
-      size_t memory_needed = output_size + (1024 * 1024); // +1MB de marge
-      
-      ESP_LOGI(TAG_IMAGE, "💾 Image will need %zu bytes (%.1f MB)", 
-               output_size, output_size / (1024.0f * 1024.0f));
-      
-      if (free_heap >= memory_needed) {
-        // Allouer le buffer de sortie
-        this->image_data_.resize(output_size);
-        ESP_LOGI(TAG_IMAGE, "✅ Allocated image buffer: %zu bytes", output_size);
-        
-        jpeg_info->close();
-        delete jpeg_info;
-        
-        // Phase 2: Décodage adaptatif selon la taille
-        if (detected_width >= 1920 || detected_height >= 1080) {
-          success = this->decode_jpeg_ultra_large(jpeg_data);  // 4K/2K
-        } else if (detected_width >= 1280 || detected_height >= 720) {
-          success = this->decode_jpeg_large_screen(jpeg_data); // HD 720p/1080p
-        } else if (detected_width >= 640 || detected_height >= 480) {
-          success = this->decode_jpeg_medium_screen(jpeg_data); // VGA/WVGA
-        } else {
-          success = this->decode_jpeg_small_screen(jpeg_data);  // Petites images
-        }
-        
-      } else {
-        ESP_LOGW(TAG_IMAGE, "⚠️ Not enough memory: need %zu, have %zu", memory_needed, free_heap);
-        jpeg_info->close();
-        delete jpeg_info;
-        return this->decode_jpeg_fallback(jpeg_data);
-      }
-      
-    } else {
-      ESP_LOGE(TAG_IMAGE, "❌ Invalid dimensions: %dx%d", detected_width, detected_height);
-      jpeg_info->close();
-      delete jpeg_info;
-    }
-  } else {
-    ESP_LOGE(TAG_IMAGE, "❌ Failed to open JPEG for analysis");
-    delete jpeg_info;
+  ESP_LOGI(TAG_IMAGE, "📏 JPEG dimensions from JPEGDEC: %dx%d", detected_width, detected_height);
+  
+  // Valider les dimensions
+  if (detected_width <= 0 || detected_height <= 0 || 
+      detected_width > 4096 || detected_height > 4096) {
+    ESP_LOGE(TAG_IMAGE, "❌ Invalid JPEG dimensions: %dx%d", detected_width, detected_height);
+    jpeg.close();
+    return false;
   }
   
-  ESP_LOGI(TAG_IMAGE, "💾 Free heap after decode: %zu bytes", esp_get_free_heap_size());
-  return success;
-}
-
-// =====================================================
-// DÉCODEURS SPÉCIALISÉS PAR TAILLE D'ÉCRAN
-// =====================================================
-
-bool SdImageComponent::decode_jpeg_large_screen(const std::vector<uint8_t> &jpeg_data) {
-  ESP_LOGI(TAG_IMAGE, "🖥️ Using LARGE SCREEN decoder for %dx%d", this->width_, this->height_);
-  
-  // Pour 1280x720 et similaires : tiles très petites
-  int tile_size = 16; // 16x16 pixels pour maximiser la sécurité
-  
-  // Ajuster selon la RAM disponible
-  size_t free_heap = esp_get_free_heap_size();
-  if (free_heap > 10 * 1024 * 1024) { // Plus de 10MB
-    tile_size = 24;
-  } else if (free_heap > 5 * 1024 * 1024) { // Plus de 5MB
-    tile_size = 20;
+  // Si les dimensions n'étaient pas définies, les utiliser
+  if (this->width_ <= 0 || this->height_ <= 0) {
+    this->width_ = detected_width;
+    this->height_ = detected_height;
+    ESP_LOGI(TAG_IMAGE, "📐 Using detected dimensions: %dx%d", this->width_, this->height_);
+  } else if (this->width_ != detected_width || this->height_ != detected_height) {
+    ESP_LOGW(TAG_IMAGE, "⚠️ Dimension mismatch: configured %dx%d vs detected %dx%d", 
+             this->width_, this->height_, detected_width, detected_height);
+    // Utiliser les dimensions détectées
+    this->width_ = detected_width;
+    this->height_ = detected_height;
   }
   
-  ESP_LOGI(TAG_IMAGE, "🔲 Large screen tile size: %dx%d (mem: %zu MB)", 
-           tile_size, tile_size, free_heap / (1024 * 1024));
+  // Allouer le buffer de sortie
+  size_t output_size = this->calculate_output_size();
+  this->image_data_.resize(output_size);
+  ESP_LOGI(TAG_IMAGE, "💾 Allocated %zu bytes for decoded image (%s)", 
+           output_size, this->get_output_format_string().c_str());
   
-  return this->decode_with_micro_tiles(jpeg_data, tile_size);
-}
-
-bool SdImageComponent::decode_jpeg_ultra_large(const std::vector<uint8_t> &jpeg_data) {
-  ESP_LOGI(TAG_IMAGE, "🖥️ Using ULTRA-LARGE decoder for %dx%d", this->width_, this->height_);
+  // Configurer les variables statiques pour le callback
+  target_buffer = &this->image_data_;
+  target_width = this->width_;
+  target_height = this->height_;
+  target_format = this->output_format_;
+  target_byte_order = this->byte_order_;
+  current_instance = this;
   
-  // Pour 4K et plus : tiles minuscules
-  int tile_size = 8; // 8x8 pixels - ultra-sécurisé
+  ESP_LOGI(TAG_IMAGE, "🔄 Starting JPEG decode with callback...");
   
-  ESP_LOGI(TAG_IMAGE, "🔲 Ultra-large tile size: %dx%d", tile_size, tile_size);
+  // Décoder l'image (le callback sera appelé automatiquement)
+  int decode_result = jpeg.decode(0, 0, 0);
   
-  return this->decode_with_micro_tiles(jpeg_data, tile_size);
-}
-
-bool SdImageComponent::decode_jpeg_medium_screen(const std::vector<uint8_t> &jpeg_data) {
-  ESP_LOGI(TAG_IMAGE, "🖥️ Using MEDIUM SCREEN decoder for %dx%d", this->width_, this->height_);
+  // Nettoyer
+  jpeg.close();
+  target_buffer = nullptr;
+  current_instance = nullptr;
   
-  int tile_size = 32; // 32x32 pixels
-  return this->decode_with_micro_tiles(jpeg_data, tile_size);
-}
-
-bool SdImageComponent::decode_jpeg_small_screen(const std::vector<uint8_t> &jpeg_data) {
-  ESP_LOGI(TAG_IMAGE, "🖥️ Using SMALL SCREEN decoder for %dx%d", this->width_, this->height_);
-  
-  int tile_size = 64; // 64x64 pixels
-  return this->decode_with_micro_tiles(jpeg_data, tile_size);
-}
-
-// =====================================================
-// DÉCODEUR MICRO-TILES ULTRA-OPTIMISÉ
-// =====================================================
-
-bool SdImageComponent::decode_with_micro_tiles(const std::vector<uint8_t> &jpeg_data, int tile_size) {
-  int total_tiles = ((this->width_ + tile_size - 1) / tile_size) * 
-                   ((this->height_ + tile_size - 1) / tile_size);
-  
-  ESP_LOGI(TAG_IMAGE, "🔄 Processing %d micro-tiles of %dx%d...", total_tiles, tile_size, tile_size);
-  
-  int tiles_processed = 0;
-  int tiles_successful = 0;
-  
-  // Traitement par bandes horizontales pour optimiser la mémoire
-  int band_height = tile_size * 4; // Traiter 4 lignes de tiles à la fois
-  
-  for (int band_y = 0; band_y < this->height_; band_y += band_height) {
-    int actual_band_height = std::min(band_height, this->height_ - band_y);
-    
-    ESP_LOGI(TAG_IMAGE, "📊 Processing band %d-%d (height: %d)", 
-             band_y, band_y + actual_band_height, actual_band_height);
-    
-    // Traiter chaque tile dans cette bande
-    for (int y = band_y; y < band_y + actual_band_height; y += tile_size) {
-      for (int x = 0; x < this->width_; x += tile_size) {
-        int tile_w = std::min(tile_size, this->width_ - x);
-        int tile_h = std::min(tile_size, this->height_ - y);
-        
-        // Décoder cette micro-tile
-        if (this->decode_ultra_safe_tile(jpeg_data, x, y, tile_w, tile_h)) {
-          tiles_successful++;
-        }
-        
-        tiles_processed++;
-        
-        // Yield très fréquent pour les grandes images
-        if (tiles_processed % 1 == 0) { // Chaque tile !
-          esp_task_wdt_reset();
-          
-          // Yield plus long pour les très grandes images
-          if (total_tiles > 1000) {
-            vTaskDelay(pdMS_TO_TICKS(2));
-          } else {
-            vTaskDelay(pdMS_TO_TICKS(1));
-          }
-        }
-        
-        // Progrès détaillé pour grandes images
-        if (total_tiles > 100 && tiles_processed % (total_tiles / 20) == 0) {
-          int progress = (tiles_processed * 100) / total_tiles;
-          float success_rate = (tiles_successful * 100.0f) / tiles_processed;
-          ESP_LOGI(TAG_IMAGE, "📊 Progress: %d%% (%d/%d tiles, %.1f%% success)", 
-                   progress, tiles_processed, total_tiles, success_rate);
-          
-          esp_task_wdt_reset();
-          vTaskDelay(pdMS_TO_TICKS(10)); // Pause plus longue
-        }
-      }
-    }
-    
-    // Pause entre les bandes pour éviter la surcharge
-    esp_task_wdt_reset();
-    vTaskDelay(pdMS_TO_TICKS(5));
+  if (decode_result != 1) {
+    ESP_LOGE(TAG_IMAGE, "❌ JPEGDEC decode failed with result: %d", decode_result);
+    return false;
   }
   
-  float final_success_rate = (tiles_successful * 100.0f) / total_tiles;
-  ESP_LOGI(TAG_IMAGE, "✅ Micro-tile decoding completed: %d/%d tiles (%.1f%% success)", 
-           tiles_successful, total_tiles, final_success_rate);
-  
-  // Considérer comme réussi si au moins 80% des tiles sont OK
-  return final_success_rate >= 80.0f;
-}
-
-bool SdImageComponent::decode_ultra_safe_tile(const std::vector<uint8_t> &jpeg_data,
-                                             int tile_x, int tile_y, int tile_w, int tile_h) {
-  // Allocation heap ultra-minimaliste
-  JPEGDEC *jpeg = new(std::nothrow) JPEGDEC();
-  if (!jpeg) {
-    return false; // Pas de log pour éviter le spam
-  }
-  
-  bool success = false;
-  
-  // Configuration micro-tile
-  g_tile_context.instance = this;
-  g_tile_context.tile_x = tile_x;
-  g_tile_context.tile_y = tile_y;
-  g_tile_context.tile_w = tile_w;
-  g_tile_context.tile_h = tile_h;
-  g_tile_context.active = true;
-  
-  // Décodage ultra-rapide
-  if (jpeg->openRAM((uint8_t*)jpeg_data.data(), jpeg_data.size(), tile_callback_wrapper) == 1) {
-    if (jpeg->decode(0, 0, 0) == 1) {
-      success = true;
-    }
-    jpeg->close();
-  }
-  
-  g_tile_context.active = false;
-  delete jpeg;
-  
-  return success;
+  ESP_LOGI(TAG_IMAGE, "✅ JPEG decoding complete with JPEGDEC");
+  return true;
 }
 
 bool SdImageComponent::decode_jpeg(const std::vector<uint8_t> &jpeg_data) {
-  ESP_LOGI(TAG_IMAGE, "🔧 Starting ultra-safe JPEG decoding...");
+  // Essayer d'abord le vrai décodeur JPEGDEC
+  ESP_LOGI(TAG_IMAGE, "🔧 Attempting to use JPEGDEC library...");
   
-  // Utiliser le décodage ultra-sécurisé en priorité
   bool result = this->decode_jpeg_real(jpeg_data);
-  
   if (result) {
-    ESP_LOGI(TAG_IMAGE, "✅ Ultra-safe JPEG decoding successful");
+    ESP_LOGI(TAG_IMAGE, "✅ JPEGDEC decoding successful");
     return true;
   } else {
-    ESP_LOGW(TAG_IMAGE, "⚠️ Ultra-safe JPEG decoding failed, using fallback");
-    return this->decode_jpeg_fallback(jpeg_data);
-  }
-}
-
-// =====================================================
-// DÉCODEUR PNG (fallback seulement pour l'instant)
-// =====================================================
-
-bool SdImageComponent::decode_png_real(const std::vector<uint8_t> &png_data) {
-  ESP_LOGW(TAG_IMAGE, "⚠️ Real PNG decoder not implemented yet");
-  return false;
-}
-
-bool SdImageComponent::decode_png(const std::vector<uint8_t> &png_data) {
-  // On utilise le vrai décodeur si dispo, sinon le fallback
-  ESP_LOGI(TAG_IMAGE, "🔧 Attempting to use PNG decoder...");
-  
-  bool result = this->decode_png_real(png_data);
-  if (result) {
-    ESP_LOGI(TAG_IMAGE, "✅ PNG decoding successful");
-    return true;
-  } else {
-    ESP_LOGW(TAG_IMAGE, "⚠️ PNG decoding failed, trying fallback");
+    ESP_LOGW(TAG_IMAGE, "⚠️ JPEGDEC decoding failed, trying fallback");
   }
   
-  // Fallback vers le pattern de test
-  return this->decode_png_fallback(png_data);
-}
-
-// =====================================================
-// CONVERSION DE FORMATS
-// =====================================================
-
-void SdImageComponent::convert_rgb888_to_target(const uint8_t *rgb_data, size_t pixel_count) {
-  for (size_t i = 0; i < pixel_count; i++) {
-    uint8_t r = rgb_data[i * 3 + 0];
-    uint8_t g = rgb_data[i * 3 + 1];
-    uint8_t b = rgb_data[i * 3 + 2];
-    
-    size_t offset = i * this->get_pixel_size();
-    this->set_pixel_at_offset(offset, r, g, b, 255);
-  }
-}
-
-void SdImageComponent::convert_rgba_to_target(const uint8_t *rgba_data, size_t pixel_count) {
-  for (size_t i = 0; i < pixel_count; i++) {
-    uint8_t r = rgba_data[i * 4 + 0];
-    uint8_t g = rgba_data[i * 4 + 1];
-    uint8_t b = rgba_data[i * 4 + 2];
-    uint8_t a = rgba_data[i * 4 + 3];
-    
-    size_t offset = i * this->get_pixel_size();
-    this->set_pixel_at_offset(offset, r, g, b, a);
-  }
-}
-
-// =====================================================
-// DÉCODEURS FALLBACK (patterns de test)
-// =====================================================
-
-bool SdImageComponent::decode_jpeg_fallback(const std::vector<uint8_t> &jpeg_data) {
-  ESP_LOGI(TAG_IMAGE, "🔄 Using JPEG fallback decoder (test pattern)");
-  
-  // Extract dimensions from JPEG header
-  int detected_width = 0, detected_height = 0;
-  
-  if (!this->extract_jpeg_dimensions(jpeg_data, detected_width, detected_height)) {
-    detected_width = 320;
-    detected_height = 240;
-    ESP_LOGI(TAG_IMAGE, "📐 Using default dimensions: %dx%d", detected_width, detected_height);
-  } else {
-    ESP_LOGI(TAG_IMAGE, "✅ JPEG dimensions extracted: %dx%d", detected_width, detected_height);
-  }
-  
-  // Validate dimensions
-  if (detected_width <= 0 || detected_height <= 0 || detected_width > 2048 || detected_height > 2048) {
-    ESP_LOGE(TAG_IMAGE, "❌ Invalid JPEG dimensions: %dx%d", detected_width, detected_height);
-    return false;
-  }
-  
-  this->width_ = detected_width;
-  this->height_ = detected_height;
-  
-  // Calculate output size and allocate
-  size_t output_size = this->calculate_output_size();
-  this->image_data_.resize(output_size);
-  
-  // Generate test pattern
-  this->generate_jpeg_test_pattern(jpeg_data);
-  
-  return true;
-}
-
-bool SdImageComponent::decode_png_fallback(const std::vector<uint8_t> &png_data) {
-  ESP_LOGI(TAG_IMAGE, "🔄 Using PNG fallback decoder (test pattern)");
-  
-  // Extract dimensions from PNG header
-  int detected_width = 0, detected_height = 0;
-  
-  if (!this->extract_png_dimensions(png_data, detected_width, detected_height)) {
-    detected_width = 320;
-    detected_height = 240;
-    ESP_LOGI(TAG_IMAGE, "📐 Using default dimensions: %dx%d", detected_width, detected_height);
-  } else {
-    ESP_LOGI(TAG_IMAGE, "✅ PNG dimensions extracted: %dx%d", detected_width, detected_height);
-  }
-  
-  // Validate dimensions
-  if (detected_width <= 0 || detected_height <= 0 || detected_width > 2048 || detected_height > 2048) {
-    ESP_LOGE(TAG_IMAGE, "❌ Invalid PNG dimensions: %dx%d", detected_width, detected_height);
-    return false;
-  }
-  
-  this->width_ = detected_width;
-  this->height_ = detected_height;
-  
-  // Calculate output size and allocate
-  size_t output_size = this->calculate_output_size();
-  this->image_data_.resize(output_size);
-  
-  // Generate test pattern
-  this->generate_png_test_pattern(png_data);
-  
-  return true;
-}
-
-// =====================================================
-// DIMENSION EXTRACTION METHODS
-// =====================================================
-
-bool SdImageComponent::extract_jpeg_dimensions(const std::vector<uint8_t> &data, int &width, int &height) const {
-  ESP_LOGD(TAG_IMAGE, "🔍 Scanning JPEG for SOF markers...");
-  
-  for (size_t i = 0; i < data.size() - 10; i++) {
-    if (data[i] == 0xFF) {
-      uint8_t marker = data[i + 1];
-      
-      // SOF0, SOF1, SOF2, SOF3 markers
-      if (marker >= 0xC0 && marker <= 0xC3) {
-        ESP_LOGD(TAG_IMAGE, "🎯 Found SOF%d marker at position %zu", marker - 0xC0, i);
-        
-        if (i + 9 < data.size()) {
-          // Skip marker (2 bytes) + length (2 bytes) + precision (1 byte)
-          height = (data[i + 5] << 8) | data[i + 6];
-          width = (data[i + 7] << 8) | data[i + 8];
-          
-          ESP_LOGD(TAG_IMAGE, "✅ Extracted dimensions: %dx%d", width, height);
-          return true;
-        } else {
-          ESP_LOGW(TAG_IMAGE, "⚠️ SOF marker found but not enough data");
-        }
-      }
-    }
-  }
-  
-  ESP_LOGD(TAG_IMAGE, "❌ No valid SOF markers found");
-  return false;
-}
-
-bool SdImageComponent::extract_png_dimensions(const std::vector<uint8_t> &data, int &width, int &height) const {
-  ESP_LOGD(TAG_IMAGE, "🔍 Reading PNG IHDR chunk...");
-  
-  if (data.size() >= 24) {
-    // Check if we have IHDR chunk at expected position
-    if (data[12] == 'I' && data[13] == 'H' && data[14] == 'D' && data[15] == 'R') {
-      ESP_LOGD(TAG_IMAGE, "✅ IHDR chunk found at expected position");
-      
-      // Width: bytes 16-19, Height: bytes 20-23 (big endian)
-      width = (data[16] << 24) | (data[17] << 16) | (data[18] << 8) | data[19];
-      height = (data[20] << 24) | (data[21] << 16) | (data[22] << 8) | data[23];
-      
-      ESP_LOGD(TAG_IMAGE, "✅ Extracted dimensions: %dx%d", width, height);
-      return true;
-    } else {
-      ESP_LOGW(TAG_IMAGE, "⚠️ IHDR chunk not found at expected position");
-    }
-  } else {
-    ESP_LOGW(TAG_IMAGE, "⚠️ PNG file too small for IHDR chunk: %zu bytes", data.size());
-  }
-  
-  return false;
-}
-
-// =====================================================
-// TEST PATTERN GENERATION METHODS
-// =====================================================
-
-void SdImageComponent::generate_jpeg_test_pattern(const std::vector<uint8_t> &source_data) {
-  ESP_LOGI(TAG_IMAGE, "🎨 Generating JPEG test pattern (gradient + hash pattern)");
-  
-  for (int y = 0; y < this->height_; y++) {
-    for (int x = 0; x < this->width_; x++) {
-      size_t offset = this->get_pixel_offset(x, y);
-      
-      // Create a gradient pattern with JPEG-like characteristics
-      uint8_t r = (x * 255) / this->width_;                    // Horizontal red gradient
-      uint8_t g = (y * 255) / this->height_;                   // Vertical green gradient
-      uint8_t b = ((x + y) * 128) / (this->width_ + this->height_); // Diagonal blue gradient
-      
-      // Add some "compression artifacts" pattern
-      if ((x / 8) % 2 == 0 && (y / 8) % 2 == 0) {
-        r = std::min(255, (int)r + 50);
-      }
-      
-      this->set_pixel_at_offset(offset, r, g, b, 255);
-    }
-  }
-}
-
-void SdImageComponent::generate_png_test_pattern(const std::vector<uint8_t> &source_data) {
-  ESP_LOGI(TAG_IMAGE, "🎨 Generating PNG test pattern (checkboard + borders)");
-  
-  for (int y = 0; y < this->height_; y++) {
-    for (int x = 0; x < this->width_; x++) {
-      size_t offset = this->get_pixel_offset(x, y);
-      
-      uint8_t r = 0, g = 0, b = 0;
-      
-      // Border
-      if (x < 5 || x >= this->width_ - 5 || y < 5 || y >= this->height_ - 5) {
-        r = 255; g = 0; b = 0;  // Red border
-      }
-      // Checkerboard pattern
-      else if (((x / 16) + (y / 16)) % 2 == 0) {
-        r = 255; g = 255; b = 255;  // White squares
-      } else {
-        r = 0; g = 0; b = 255;      // Blue squares
-      }
-      
-      this->set_pixel_at_offset(offset, r, g, b, 255);
-    }
-  }
-}
-
-// =====================================================
-// UTILITY METHODS
-// =====================================================
-
-void SdImageComponent::list_directory_contents(const std::string &dir_path) {
-  ESP_LOGI(TAG_IMAGE, "📁 Directory listing for: '%s'", dir_path.c_str());
-  
-  DIR *dir = opendir(dir_path.c_str());
-  if (!dir) {
-    ESP_LOGE(TAG_IMAGE, "❌ Cannot open directory: '%s' (errno: %d)", dir_path.c_str(), errno);
-    return;
-  }
-  
-  struct dirent *entry;
-  int file_count = 0;
-  
-  while ((entry = readdir(dir)) != nullptr) {
-    std::string full_path = dir_path;
-    if (full_path.back() != '/') full_path += "/";
-    full_path += entry->d_name;
-    
-    struct stat st;
-    if (stat(full_path.c_str(), &st) == 0) {
-      if (S_ISREG(st.st_mode)) {
-        ESP_LOGI(TAG_IMAGE, "   📄 %s (%ld bytes)", entry->d_name, (long)st.st_size);
-        file_count++;
-      } else if (S_ISDIR(st.st_mode)) {
-        ESP_LOGI(TAG_IMAGE, "   📁 %s/", entry->d_name);
-      }
-    } else {
-      ESP_LOGI(TAG_IMAGE, "   ❓ %s (stat failed)", entry->d_name);
-    }
-  }
-  
-  closedir(dir);
-  ESP_LOGI(TAG_IMAGE, "📊 Total files found: %d", file_count);
-}
-
-// Helper methods
-bool SdImageComponent::load_image() {
-  return this->load_image_from_path(this->file_path_);
-}
-
-void SdImageComponent::unload_image() {
-  ESP_LOGI(TAG_IMAGE, "🗑️ Unloading image data");
-  this->image_data_.clear();
-  this->is_loaded_ = false;
-}
-
-bool SdImageComponent::reload_image() {
-  this->unload_image();
-  return this->load_image();
-}
-
-bool SdImageComponent::load_raw_data(const std::vector<uint8_t> &raw_data) {
-  ESP_LOGI(TAG_IMAGE, "🔄 Loading raw data: %zu bytes", raw_data.size());
-  
-  size_t expected_size = this->calculate_output_size();
-  
-  if (raw_data.size() == expected_size) {
-    // Direct copy
-    this->image_data_ = raw_data;
-    ESP_LOGI(TAG_IMAGE, "✅ Raw data loaded directly");
-  } else {
-    // Generate pattern if size doesn't match
-    ESP_LOGW(TAG_IMAGE, "⚠️ Raw data size mismatch. Expected: %zu, Got: %zu", expected_size, raw_data.size());
-    this->image_data_.resize(expected_size);
-    this->generate_test_pattern(raw_data);
-  }
-  
-  return true;
-}
-
-void SdImageComponent::generate_test_pattern(const std::vector<uint8_t> &source_data) {
-  ESP_LOGI(TAG_IMAGE, "🎨 Generating generic test pattern");
-  
-  for (int y = 0; y < this->height_; y++) {
-    for (int x = 0; x < this->width_; x++) {
-      size_t offset = this->get_pixel_offset(x, y);
-      
-      uint8_t r = (x * 255) / this->width_;
-      uint8_t g = (y * 255) / this->height_;
-      uint8_t b = 128;
-      
-      this->set_pixel_at_offset(offset, r, g, b, 255);
-    }
-  }
-}
-
-// Draw method (required by Image interface)
-void SdImageComponent::draw(int x, int y, display::Display *display, Color color_on, Color color_off) {
-  if (!this->is_loaded_ || this->image_data_.empty()) {
-    ESP_LOGW(TAG_IMAGE, "Cannot draw: image not loaded");
-    return;
-  }
-  
-  // TODO: Implement proper drawing
-  ESP_LOGD(TAG_IMAGE, "Drawing image at %d,%d", x, y);
-}
-
-// Pixel access methods
-void SdImageComponent::get_pixel(int x, int y, uint8_t &red, uint8_t &green, uint8_t &blue) const {
-  uint8_t alpha;
-  this->get_pixel(x, y, red, green, blue, alpha);
-}
-
-void SdImageComponent::get_pixel(int x, int y, uint8_t &red, uint8_t &green, uint8_t &blue, uint8_t &alpha) const {
-  if (!this->validate_pixel_access(x, y) || !this->is_loaded_) {
-    red = green = blue = alpha = 0;
-    return;
-  }
-  
-  size_t offset = this->get_pixel_offset(x, y);
-  
-  switch (this->output_format_) {
-    case OutputImageFormat::rgb565: {
-      uint16_t rgb565;
-      if (this->byte_order_ == ByteOrder::little_endian) {
-        rgb565 = this->image_data_[offset] | (this->image_data_[offset + 1] << 8);
-      } else {
-        rgb565 = (this->image_data_[offset] << 8) | this->image_data_[offset + 1];
-      }
-      red = (rgb565 >> 11) << 3;
-      green = ((rgb565 >> 5) & 0x3F) << 2;
-      blue = (rgb565 & 0x1F) << 3;
-      alpha = 255;
-      break;
-    }
-    case OutputImageFormat::rgb888:
-      red = this->image_data_[offset + 0];
-      green = this->image_data_[offset + 1];
-      blue = this->image_data_[offset + 2];
-      alpha = 255;
-      break;
-    case OutputImageFormat::rgba:
-      red = this->image_data_[offset + 0];
-      green = this->image_data_[offset + 1];
-      blue = this->image_data_[offset + 2];
-      alpha = this->image_data_[offset + 3];
-      break;
-  }
-}
-
-bool SdImageComponent::validate_pixel_access(int x, int y) const {
-  return x >= 0 && x < this->width_ && y >= 0 && y < this->height_;
-}
-
-bool SdImageComponent::validate_image_data() const {
-  if (!this->is_loaded_ || this->image_data_.empty()) {
-    return false;
-  }
-  
-  size_t expected_size = this->calculate_output_size();
-  return this->image_data_.size() == expected_size;
-}
-
-// Méthodes de compatibilité legacy (pour éviter les erreurs de compilation)
-bool SdImageComponent::decode_jpeg_tiled(const std::vector<uint8_t> &jpeg_data) {
-  // Rediriger vers la nouvelle implémentation
-  return this->decode_jpeg_real(jpeg_data);
-}
-
-bool SdImageComponent::decode_jpeg_tile(const std::vector<uint8_t> &jpeg_data, 
-                                       int tile_x, int tile_y, int tile_w, int tile_h) {
-  // Rediriger vers la nouvelle méthode ultra-safe
-  return this->decode_ultra_safe_tile(jpeg_data, tile_x, tile_y, tile_w, tile_h);
-}
-
-bool SdImageComponent::decode_jpeg_safe_tiles(const std::vector<uint8_t> &jpeg_data) {
-  // Rediriger vers la nouvelle méthode adaptative
-  return this->decode_with_micro_tiles(jpeg_data, 32);
-}
-
-bool SdImageComponent::decode_single_tile_safe(const std::vector<uint8_t> &jpeg_data,
-                                              int tile_x, int tile_y, int tile_w, int tile_h) {
-  // Rediriger vers la nouvelle méthode ultra-safe
-  return this->decode_ultra_safe_tile(jpeg_data, tile_x, tile_y, tile_w, tile_h);
+  // Si JPEGDEC échoue, utiliser le fallback
+  ESP_LOGW(TAG_IMAGE, "🔄 Falling back to test pattern decoder");
+  return this->decode_jpeg_fallback(jpeg_data);
 }
 
 // =====================================================
