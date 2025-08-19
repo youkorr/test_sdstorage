@@ -449,53 +449,49 @@ bool SdImageComponent::decode_jpeg_real(const std::vector<uint8_t> &jpeg_data) {
     return false;
   }
   
-// Récupérer les informations de l'image
-int detected_width = jpeg.getWidth();
-int detected_height = jpeg.getHeight();
-int jpeg_subsample = jpeg.getSubSample();
-
-// Remplacer getMCUPixels() manquant
-int jpeg_mcu_pixels = jpeg.getMCUWidth() * jpeg.getMCUHeight();
-
-ESP_LOGI(TAG_IMAGE, "📏 JPEG info from JPEGDEC:");
-ESP_LOGI(TAG_IMAGE, "   Dimensions: %dx%d", detected_width, detected_height);
-ESP_LOGI(TAG_IMAGE, "   Subsample: %d", jpeg_subsample);
-ESP_LOGI(TAG_IMAGE, "   MCU pixels: %d", jpeg_mcu_pixels);
-
-// Valider les dimensions
-if (detected_width <= 0 || detected_height <= 0 ||
-    detected_width > 4096 || detected_height > 4096) {
-  ESP_LOGE(TAG_IMAGE, "❌ Invalid JPEG dimensions: %dx%d", detected_width, detected_height);
-  jpeg.close();
-  return false;
-}
-
-// Mettre à jour les dimensions si nécessaire
-if (this->width_ <= 0 || this->height_ <= 0) {
-  this->width_ = detected_width;
-  this->height_ = detected_height;
-  ESP_LOGI(TAG_IMAGE, "📐 Using detected dimensions: %dx%d", this->width_, this->height_);
-} else if (this->width_ != detected_width || this->height_ != detected_height) {
-  ESP_LOGW(TAG_IMAGE, "⚠️ Dimension mismatch: configured %dx%d vs detected %dx%d",
-           this->width_, this->height_, detected_width, detected_height);
-  // Utiliser les dimensions détectées pour éviter les problèmes
-  this->width_ = detected_width;
-  this->height_ = detected_height;
-}
-
-// Allouer le buffer de sortie
-size_t output_size = this->calculate_output_size();
-ESP_LOGI(TAG_IMAGE, "💾 Allocating %zu bytes for decoded image", output_size);
-
-// ⚠️ Pas d'exceptions -> utiliser nothrow et vérifier le pointeur
-try {
-  this->image_data_.resize(output_size, 0);  // OK si image_data_ est un std::vector
-} catch (...) {
-  ESP_LOGE(TAG_IMAGE, "❌ Failed to allocate memory for image: %zu bytes", output_size);
-  jpeg.close();
-  return false;
-}
-
+  // Récupérer les informations de l'image
+  int detected_width = jpeg.getWidth();
+  int detected_height = jpeg.getHeight();
+  int jpeg_subsample = jpeg.getSubSample();
+  int jpeg_mcu_pixels = jpeg.getMCUPixels();
+  
+  ESP_LOGI(TAG_IMAGE, "📏 JPEG info from JPEGDEC:");
+  ESP_LOGI(TAG_IMAGE, "   Dimensions: %dx%d", detected_width, detected_height);
+  ESP_LOGI(TAG_IMAGE, "   Subsample: %d", jpeg_subsample);
+  ESP_LOGI(TAG_IMAGE, "   MCU pixels: %d", jpeg_mcu_pixels);
+  
+  // Valider les dimensions
+  if (detected_width <= 0 || detected_height <= 0 || 
+      detected_width > 4096 || detected_height > 4096) {
+    ESP_LOGE(TAG_IMAGE, "❌ Invalid JPEG dimensions: %dx%d", detected_width, detected_height);
+    jpeg.close();
+    return false;
+  }
+  
+  // Mettre à jour les dimensions si nécessaire
+  if (this->width_ <= 0 || this->height_ <= 0) {
+    this->width_ = detected_width;
+    this->height_ = detected_height;
+    ESP_LOGI(TAG_IMAGE, "📐 Using detected dimensions: %dx%d", this->width_, this->height_);
+  } else if (this->width_ != detected_width || this->height_ != detected_height) {
+    ESP_LOGW(TAG_IMAGE, "⚠️ Dimension mismatch: configured %dx%d vs detected %dx%d", 
+             this->width_, this->height_, detected_width, detected_height);
+    // Utiliser les dimensions détectées pour éviter les problèmes
+    this->width_ = detected_width;
+    this->height_ = detected_height;
+  }
+  
+  // Allouer le buffer de sortie
+  size_t output_size = this->calculate_output_size();
+  ESP_LOGI(TAG_IMAGE, "💾 Allocating %zu bytes for decoded image", output_size);
+  
+  try {
+    this->image_data_.resize(output_size, 0); // Initialiser à zéro
+  } catch (const std::bad_alloc &e) {
+    ESP_LOGE(TAG_IMAGE, "❌ Failed to allocate memory for image: %zu bytes", output_size);
+    jpeg.close();
+    return false;
+  }
   
   ESP_LOGI(TAG_IMAGE, "✅ Memory allocated successfully");
   
