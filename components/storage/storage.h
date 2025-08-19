@@ -12,37 +12,14 @@
 #include "esphome/components/display/display.h"
 #include "../sd_mmc_card/sd_mmc_card.h"
 
-// Décodeurs d'images - Toujours inclure JPEGDEC
-#include <JPEGDEC.h>
-
-// Définir la version si pas définie
-#ifndef JPEGDEC_VERSION
-#define JPEGDEC_VERSION "1.2.7"
-#endif
-
 namespace esphome {
 namespace storage {
 
 // Forward declarations
 class StorageComponent;
 
-// Utiliser l'enum ImageType de ESPHome
-using ImageType = image::ImageType;
-
-// Énumérations correctement déclarées avec enum class
-enum class OutputImageFormat {
-  rgb565,
-  rgb888,
-  rgba
-};
-
-enum class ByteOrder {
-  little_endian,
-  big_endian
-};
-
 // =====================================================
-// StorageComponent - Classe principale Storage
+// StorageComponent - Classe principale Storage (inchangée)
 // =====================================================
 class StorageComponent : public Component {
  public:
@@ -76,196 +53,91 @@ class StorageComponent : public Component {
 };
 
 // =====================================================
-// SdImageComponent - Composant d'image SD avec vrais décodeurs
+// SdImageComponent - Compatible avec esphome::image::Image
 // =====================================================
 class SdImageComponent : public Component, public image::Image {
  public:
-  // Constructeur proper pour image::Image base class
+  // Constructeur qui initialise la classe Image de base
   SdImageComponent() : image::Image(nullptr, 0, 0, image::IMAGE_TYPE_RGB565, image::TRANSPARENCY_OPAQUE) {}
 
-  // Méthodes Component
+  // ===== MÉTHODES COMPONENT =====
   void setup() override;
   void loop() override {}
   void dump_config() override;
   float get_setup_priority() const override { return setup_priority::DATA; }
   
-  // ===== CONFIGURATION METHODS =====
+  // ===== CONFIGURATION =====
   void set_file_path(const std::string &path) { this->file_path_ = path; }
-  void set_output_format(OutputImageFormat format) { this->output_format_ = format; }
-  void set_byte_order(ByteOrder byte_order) { this->byte_order_ = byte_order; }
   void set_storage_component(StorageComponent *storage) { this->storage_component_ = storage; }
-  
-  // String setter methods (appelées depuis Python)
-  void set_output_format_string(const std::string &format);
-  void set_byte_order_string(const std::string &byte_order);
-  
-  // Setters pour les dimensions
-  void set_width(int width) { this->width_ = width; }
-  void set_height(int height) { this->height_ = height; }
   void set_resize(int width, int height) { 
-    this->width_ = width; 
-    this->height_ = height; 
+    this->resize_width_ = width; 
+    this->resize_height_ = height; 
   }
   
-  // ===== GETTERS =====
-  const std::string &get_file_path() const { return this->file_path_; }
-  int get_width() const override { return this->width_; }
-  int get_height() const override { return this->height_; }
-  OutputImageFormat get_output_format() const { return this->output_format_; }
-  ByteOrder get_byte_order() const { return this->byte_order_; }
-  bool is_loaded() const { return this->is_loaded_; }
-  
-  // ===== IMAGE::IMAGE INTERFACE METHODS =====
-  void draw(int x, int y, display::Display *display, Color color_on, Color color_off) override;
-  image::ImageType get_image_type() const;
-  
-  // ===== DATA ACCESS METHODS =====
-  const uint8_t *get_data_start() const { 
-    return this->image_data_.empty() ? nullptr : this->image_data_.data(); 
-  }
-  
-  size_t get_data_length() const { 
-    return this->image_data_.size(); 
-  }
-  
-  // Compatibility methods
-  const uint8_t *get_data() const { 
-    return this->get_data_start(); 
-  }
-  size_t get_data_size() const { 
-    return this->get_data_length(); 
-  }
-  
-  // ===== IMAGE LOADING/UNLOADING =====
+  // ===== MÉTHODES D'IMAGE DYNAMIQUE =====
   bool load_image();
   bool load_image_from_path(const std::string &path);
   void unload_image();
   bool reload_image();
   
-  // ===== PIXEL ACCESS - Méthodes publiques pour le callback =====
-  void get_pixel(int x, int y, uint8_t &red, uint8_t &green, uint8_t &blue) const;
-  void get_pixel(int x, int y, uint8_t &red, uint8_t &green, uint8_t &blue, uint8_t &alpha) const; 
-  size_t get_pixel_offset(int x, int y) const;
-  void set_pixel_at_offset(size_t offset, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
+  // ===== GETTERS SPÉCIFIQUES =====
+  const std::string &get_file_path() const { return this->file_path_; }
+  bool is_loaded() const { return this->is_loaded_; }
   
-  // ===== UTILITY METHODS =====
-  bool validate_image_data() const;
-  std::string get_output_format_string() const;
-  std::string get_byte_order_string() const;
-  
-  // Display compatibility
-  void get_image_dimensions(int *width, int *height) const {
-    if (width) *width = this->width_;
-    if (height) *height = this->height_;
-  }
-  
-  const uint8_t* get_image_data() const { return this->get_data(); }
-
-  // Utility methods for diagnostics
-  bool has_valid_dimensions() const { 
-    return this->width_ > 0 && this->height_ > 0; 
-  }
-  
+  // ===== DIAGNOSTIC =====
   std::string get_debug_info() const {
     char buffer[256];
     snprintf(buffer, sizeof(buffer), 
-      "SdImage[%s]: %dx%d, %s, loaded=%s, size=%zu bytes",
+      "SdImage[%s]: %dx%d, loaded=%s, data_ptr=%p",
       this->file_path_.c_str(),
-      this->width_, this->height_,
-      this->get_output_format_string().c_str(),
+      this->get_width(), this->get_height(),
       this->is_loaded_ ? "yes" : "no",
-      this->image_data_.size()
+      this->get_data_start()
     );
     return std::string(buffer);
   }
 
  protected:
-  // ===== CONFIGURATION DATA =====
+  // ===== DONNÉES DE CONFIGURATION =====
   std::string file_path_;
-  int width_{0};
-  int height_{0};
-  OutputImageFormat output_format_{OutputImageFormat::rgb565};
-  ByteOrder byte_order_{ByteOrder::little_endian};
+  int resize_width_{0};
+  int resize_height_{0};
   
-  // ===== STATE DATA =====
+  // ===== ÉTAT =====
   bool is_loaded_{false};
-  std::vector<uint8_t> image_data_;
+  std::vector<uint8_t> image_data_; // Stockage des données d'image
   StorageComponent *storage_component_{nullptr};
   
  private:
-  // ===== FILE TYPE DETECTION =====
-  bool is_jpeg_file(const std::vector<uint8_t> &data) const;
-  bool is_png_file(const std::vector<uint8_t> &data) const;
+  // ===== MÉTHODES INTERNES =====
+  bool decode_image_data(const std::vector<uint8_t> &file_data);
+  bool create_esphome_image_from_data(const std::vector<uint8_t> &processed_data, 
+                                      int width, int height, 
+                                      image::ImageType type);
+  void update_image_properties(const uint8_t* data, int width, int height, 
+                               image::ImageType type, image::Transparency transparency);
   
-  // ===== IMAGE DECODING METHODS =====
-  bool decode_jpeg(const std::vector<uint8_t> &jpeg_data);
-  bool decode_png(const std::vector<uint8_t> &png_data);
-  bool load_raw_data(const std::vector<uint8_t> &raw_data);
+  // ===== DÉTECTION ET TRAITEMENT =====
+  bool is_supported_image_format(const std::vector<uint8_t> &data) const;
+  std::string detect_image_format(const std::vector<uint8_t> &data) const;
+  bool process_image_with_pil_simulation(const std::vector<uint8_t> &data);
   
-  // ===== VRAIS DÉCODEURS D'IMAGES =====
-  bool decode_jpeg_real(const std::vector<uint8_t> &jpeg_data);
-  bool decode_png_real(const std::vector<uint8_t> &png_data);
+  // ===== EXTRACTION DE MÉTADONNÉES =====
+  bool extract_image_dimensions(const std::vector<uint8_t> &data, 
+                                int &width, int &height, 
+                                image::ImageType &type) const;
   
-  // ===== FALLBACK DÉCODEURS (patterns de test) =====
-  bool decode_jpeg_fallback(const std::vector<uint8_t> &jpeg_data);
-  bool decode_png_fallback(const std::vector<uint8_t> &png_data);
+  // ===== MÉTHODES DE FALLBACK =====
+  bool create_test_pattern_image();
+  void generate_gradient_pattern(int width, int height);
   
-  // ===== DIMENSION EXTRACTION =====
-  bool extract_jpeg_dimensions(const std::vector<uint8_t> &data, int &width, int &height) const;
-  bool extract_png_dimensions(const std::vector<uint8_t> &data, int &width, int &height) const;
-  
-  // ===== PIXEL MANIPULATION =====
-  size_t get_pixel_size() const;
-  size_t calculate_output_size() const;
-  
-  // ===== CONVERSION DE FORMATS =====
-  void convert_rgb888_to_target(const uint8_t *rgb_data, size_t pixel_count);
-  void convert_rgba_to_target(const uint8_t *rgba_data, size_t pixel_count);
-  
-  // ===== TEST PATTERN GENERATION =====
-  void generate_test_pattern(const std::vector<uint8_t> &source_data);
-  void generate_jpeg_test_pattern(const std::vector<uint8_t> &source_data);
-  void generate_png_test_pattern(const std::vector<uint8_t> &source_data);
-  
-  // ===== VALIDATION METHODS =====
-  bool validate_dimensions() const { return this->width_ > 0 && this->height_ > 0; }
-  bool validate_file_path() const { return !this->file_path_.empty(); }
-  bool validate_pixel_access(int x, int y) const;
-  
-  // ===== UTILITY METHODS =====
-  std::string detect_file_type(const std::string &path) const {
-    size_t dot_pos = path.find_last_of('.');
-    if (dot_pos != std::string::npos) {
-      std::string ext = path.substr(dot_pos + 1);
-      std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
-      return ext;
-    }
-    return "unknown";
-  }
-  
-  bool is_supported_format(const std::string &extension) const {
-    return extension == "jpg" || extension == "jpeg" || extension == "png";
-  }
-  
-  void list_directory_contents(const std::string &dir_path);
-  
-  // ===== NOUVELLES MÉTHODES DE DEBUG ET GESTION MÉMOIRE =====
-  
-  // Gestion mémoire améliorée
-  bool allocate_image_buffer(size_t size);
-  
-  // Décodeurs simplifiés pour debug
-  bool decode_jpeg_simple(const std::vector<uint8_t> &jpeg_data);
-  
-  // Méthodes de diagnostic et debug
-  void debug_memory_usage();
-  bool test_minimal_allocation();
-  bool load_image_debug_safe();
-  void run_diagnostics();
+  // ===== UTILITAIRES =====
+  void list_directory_contents(const std::string &dir_path) const;
+  void debug_memory_usage() const;
 };
 
 // =====================================================
-// ACTION CLASSES - SdImageLoadAction
+// ACTIONS - Inchangées
 // =====================================================
 template<typename... Ts> 
 class SdImageLoadAction : public Action<Ts...> {
@@ -273,7 +145,6 @@ class SdImageLoadAction : public Action<Ts...> {
   SdImageLoadAction() = default;
   explicit SdImageLoadAction(SdImageComponent *parent) : parent_(parent) {}
   
-  // Template value pour le chemin de fichier
   TEMPLATABLE_VALUE(std::string, file_path)
   
   void set_parent(SdImageComponent *parent) { this->parent_ = parent; }
@@ -284,7 +155,6 @@ class SdImageLoadAction : public Action<Ts...> {
       return;
     }
     
-    // Si un chemin de fichier est fourni dans l'action
     if (this->file_path_.has_value()) {
       std::string path = this->file_path_.value(x...);
       if (!path.empty()) {
@@ -296,7 +166,6 @@ class SdImageLoadAction : public Action<Ts...> {
       }
     }
     
-    // Sinon, utiliser le chemin configuré
     ESP_LOGD("sd_image.load", "Loading image from configured path");
     if (!this->parent_->load_image()) {
       ESP_LOGE("sd_image.load", "Failed to load image from configured path");
@@ -307,9 +176,6 @@ class SdImageLoadAction : public Action<Ts...> {
   SdImageComponent *parent_{nullptr};
 };
 
-// =====================================================
-// ACTION CLASSES - SdImageUnloadAction
-// =====================================================
 template<typename... Ts> 
 class SdImageUnloadAction : public Action<Ts...> {
  public:
