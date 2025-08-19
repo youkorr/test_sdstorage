@@ -12,9 +12,13 @@
 #include "esphome/components/display/display.h"
 #include "../sd_mmc_card/sd_mmc_card.h"
 
-// Décodeurs d'images
+// Décodeurs d'images - Toujours inclure JPEGDEC
 #include <JPEGDEC.h>
 
+// Définir la version si pas définie
+#ifndef JPEGDEC_VERSION
+#define JPEGDEC_VERSION "1.2.7"
+#endif
 
 namespace esphome {
 namespace storage {
@@ -138,9 +142,11 @@ class SdImageComponent : public Component, public image::Image {
   void unload_image();
   bool reload_image();
   
-  // ===== PIXEL ACCESS =====
+  // ===== PIXEL ACCESS - Méthodes publiques pour le callback =====
   void get_pixel(int x, int y, uint8_t &red, uint8_t &green, uint8_t &blue) const;
   void get_pixel(int x, int y, uint8_t &red, uint8_t &green, uint8_t &blue, uint8_t &alpha) const; 
+  size_t get_pixel_offset(int x, int y) const;
+  void set_pixel_at_offset(size_t offset, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
   
   // ===== UTILITY METHODS =====
   bool validate_image_data() const;
@@ -204,20 +210,12 @@ class SdImageComponent : public Component, public image::Image {
   bool decode_jpeg_fallback(const std::vector<uint8_t> &jpeg_data);
   bool decode_png_fallback(const std::vector<uint8_t> &png_data);
   
-  // ===== CALLBACKS POUR JPEGDEC =====
-  static int jpeg_read_callback(JPEGFILE *pFile, uint8_t *pBuf, int32_t iLen);
-  static int jpeg_seek_callback(JPEGFILE *pFile, int32_t iPosition);
-  
   // ===== DIMENSION EXTRACTION =====
   bool extract_jpeg_dimensions(const std::vector<uint8_t> &data, int &width, int &height) const;
   bool extract_png_dimensions(const std::vector<uint8_t> &data, int &width, int &height) const;
   
   // ===== PIXEL MANIPULATION =====
-  void convert_pixel_format(int x, int y, const uint8_t *pixel_data, 
-                           uint8_t &red, uint8_t &green, uint8_t &blue, uint8_t &alpha) const;
   size_t get_pixel_size() const;
-  size_t get_pixel_offset(int x, int y) const;
-  void convert_byte_order();
   size_t calculate_output_size() const;
   
   // ===== CONVERSION DE FORMATS =====
@@ -228,7 +226,6 @@ class SdImageComponent : public Component, public image::Image {
   void generate_test_pattern(const std::vector<uint8_t> &source_data);
   void generate_jpeg_test_pattern(const std::vector<uint8_t> &source_data);
   void generate_png_test_pattern(const std::vector<uint8_t> &source_data);
-  void set_pixel_at_offset(size_t offset, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
   
   // ===== VALIDATION METHODS =====
   bool validate_dimensions() const;
@@ -239,10 +236,6 @@ class SdImageComponent : public Component, public image::Image {
   std::string detect_file_type(const std::string &path) const;
   bool is_supported_format(const std::string &extension) const;
   void list_directory_contents(const std::string &dir_path);
-  
-  // ===== DONNÉES TEMPORAIRES POUR DÉCODEURS =====
-  std::vector<uint8_t> *jpeg_data_ptr_{nullptr};
-  size_t jpeg_position_{0};
 };
 
 // =====================================================
@@ -316,5 +309,4 @@ class SdImageUnloadAction : public Action<Ts...> {
 
 }  // namespace storage
 }  // namespace esphome
-
 
