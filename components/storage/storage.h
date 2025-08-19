@@ -206,9 +206,23 @@ class SdImageComponent : public Component, public image::Image {
   bool decode_jpeg_real(const std::vector<uint8_t> &jpeg_data);
   bool decode_png_real(const std::vector<uint8_t> &png_data);
   
-  // ===== DÉCODAGE PAR TILES (NOUVEAU) =====
+  // ===== DÉCODEURS SPÉCIALISÉS PAR TAILLE =====
+  bool decode_jpeg_small_screen(const std::vector<uint8_t> &jpeg_data);
+  bool decode_jpeg_medium_screen(const std::vector<uint8_t> &jpeg_data);
+  bool decode_jpeg_large_screen(const std::vector<uint8_t> &jpeg_data);
+  bool decode_jpeg_ultra_large(const std::vector<uint8_t> &jpeg_data);
+  
+  // ===== MICRO-TILES ULTRA-SÉCURISÉES =====
+  bool decode_with_micro_tiles(const std::vector<uint8_t> &jpeg_data, int tile_size);
+  bool decode_ultra_safe_tile(const std::vector<uint8_t> &jpeg_data, 
+                             int tile_x, int tile_y, int tile_w, int tile_h);
+  
+  // ===== DÉCODAGE PAR TILES (LEGACY) =====
   bool decode_jpeg_tiled(const std::vector<uint8_t> &jpeg_data);
   bool decode_jpeg_tile(const std::vector<uint8_t> &jpeg_data, int tile_x, int tile_y, int tile_w, int tile_h);
+  bool decode_jpeg_safe_tiles(const std::vector<uint8_t> &jpeg_data);
+  bool decode_single_tile_safe(const std::vector<uint8_t> &jpeg_data, 
+                               int tile_x, int tile_y, int tile_w, int tile_h);
   static int tile_callback_wrapper(JPEGDRAW *pDraw);
   
   // ===== CONTEXTE GLOBAL POUR TILES =====
@@ -325,6 +339,7 @@ class SdImageUnloadAction : public Action<Ts...> {
 
 }  // namespace storage
 }  // namespace esphome
+
 
 
 
