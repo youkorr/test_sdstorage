@@ -394,9 +394,6 @@ bool SdImageComponent::decode_jpeg_real(const std::vector<uint8_t> &jpeg_data) {
   JPEGDEC jpeg;
   
   // Callback optimisé avec allocation statique
-  static uint8_t* decode_buffer = nullptr;
-  static size_t decode_buffer_size = 0;
-  
   auto draw_callback = [](JPEGDRAW *pDraw) -> int {
     if (!pDraw || !pDraw->pUser) {
       ESP_LOGE(TAG_IMAGE, "Invalid callback parameters");
@@ -491,36 +488,30 @@ bool SdImageComponent::decode_jpeg_real(const std::vector<uint8_t> &jpeg_data) {
     return false;
   }
   
-  // Allocation avec PSRAM en priorité
+  // Allocation sans try/catch (pas d'exceptions en ESP-IDF)
   this->image_data_.clear();
   
-  try {
-    // Utiliser heap_caps_malloc pour forcer l'allocation en PSRAM
-    uint8_t* psram_buffer = (uint8_t*)heap_caps_malloc(output_size, MALLOC_CAP_SPIRAM);
-    if (!psram_buffer) {
-      ESP_LOGE(TAG_IMAGE, "❌ PSRAM allocation failed, trying regular heap...");
-      
-      // Fallback sur heap normal si PSRAM échoue
-      this->image_data_.resize(output_size, 0);
-      if (this->image_data_.size() != output_size) {
-        ESP_LOGE(TAG_IMAGE, "❌ Regular heap allocation also failed");
-        jpeg.close();
-        return false;
-      }
-    } else {
-      // Copier le buffer PSRAM dans le vector
-      this->image_data_.resize(output_size);
-      // Initialiser à zéro
-      memset(psram_buffer, 0, output_size);
-      
-      // Remplacer les données du vector par le buffer PSRAM
-      memcpy(this->image_data_.data(), psram_buffer, output_size);
-      free(psram_buffer); // On libère car le vector gère sa propre mémoire
+  // Utiliser heap_caps_malloc pour forcer l'allocation en PSRAM
+  uint8_t* psram_buffer = (uint8_t*)heap_caps_malloc(output_size, MALLOC_CAP_SPIRAM);
+  if (!psram_buffer) {
+    ESP_LOGE(TAG_IMAGE, "❌ PSRAM allocation failed, trying regular heap...");
+    
+    // Fallback sur heap normal si PSRAM échoue
+    this->image_data_.resize(output_size, 0);
+    if (this->image_data_.size() != output_size) {
+      ESP_LOGE(TAG_IMAGE, "❌ Regular heap allocation also failed");
+      jpeg.close();
+      return false;
     }
-  } catch (...) {
-    ESP_LOGE(TAG_IMAGE, "❌ Exception during memory allocation");
-    jpeg.close();
-    return false;
+  } else {
+    // Copier le buffer PSRAM dans le vector
+    this->image_data_.resize(output_size);
+    // Initialiser à zéro
+    memset(psram_buffer, 0, output_size);
+    
+    // Remplacer les données du vector par le buffer PSRAM
+    memcpy(this->image_data_.data(), psram_buffer, output_size);
+    heap_caps_free(psram_buffer); // On libère car le vector gère sa propre mémoire
   }
   
   ESP_LOGI(TAG_IMAGE, "✅ Memory allocated successfully");
@@ -603,14 +594,10 @@ bool SdImageComponent::allocate_image_buffer(size_t size) {
   
   // Fallback sur heap normal ou pour petites images
   if (free_heap > size * 1.5) { // Garder une marge de sécurité
-    try {
-      this->image_data_.resize(size, 0);
-      if (this->image_data_.size() == size) {
-        ESP_LOGI(TAG_IMAGE, "✅ Heap allocation successful");
-        return true;
-      }
-    } catch (...) {
-      ESP_LOGE(TAG_IMAGE, "❌ Heap allocation exception");
+    this->image_data_.resize(size, 0);
+    if (this->image_data_.size() == size) {
+      ESP_LOGI(TAG_IMAGE, "✅ Heap allocation successful");
+      return true;
     }
   }
   
@@ -695,6 +682,159 @@ bool SdImageComponent::decode_jpeg(const std::vector<uint8_t> &jpeg_data) {
   return this->decode_jpeg_fallback(jpeg_data);
 }
 
+// =====================================================
+// MÉTHODES DE DEBUG
+// =====================================================
+
+void SdImageComponent::debug_memory_usage() {
+  size_t free_heap = esp_get_free_heap_size();
+  size_t free_psram = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+  size_t total_heap = heap_caps_get_total_size(MALLOC_CAP_8BIT);
+  size_t total_psram = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+  
+  ESP_LOGI(TAG_IMAGE, "🔍 MEMORY DEBUG INFO:");
+  ESP_LOGI(TAG_IMAGE, "   Heap:  %zu / %zu bytes free (%.1f%% used)", 
+           free_heap, total_heap, 100.0f * (total_heap - free_heap) / total_heap);
+  ESP_LOGI(TAG_IMAGE, "   PSRAM: %zu / %zu bytes free (%.1f%% used)", 
+           free_psram, total_psram, 100.0f * (total_psram - free_psram) / total_psram);
+           
+  // Stack info
+  UBaseType_t stack_high_water = uxTaskGetStackHighWaterMark(nullptr);
+  ESP_LOGI(TAG_IMAGE, "   Stack high water mark: %u bytes remaining", stack_high_water);
+  
+  if (stack_high_water < 1024) {
+    ESP_LOGW(TAG_IMAGE, "⚠️ LOW STACK WARNING: Only %u bytes remaining!", stack_high_water);
+  }
+  
+  // Info sur l'image courante
+  if (this->is_loaded_) {
+    ESP_LOGI(TAG_IMAGE, "   Current image: %dx%d, %zu bytes", 
+             this->width_, this->height_, this->image_data_.size());
+  }
+}
+
+bool SdImageComponent::test_minimal_allocation() {
+  ESP_LOGI(TAG_IMAGE, "🧪 Testing minimal memory allocation...");
+  
+  // Test avec 1x1 pixel
+  this->width_ = 1;
+  this->height_ = 1;
+  size_t minimal_size = this->calculate_output_size();
+  
+  ESP_LOGI(TAG_IMAGE, "   Minimal size (1x1): %zu bytes", minimal_size);
+  
+  if (!this->allocate_image_buffer(minimal_size)) {
+    ESP_LOGE(TAG_IMAGE, "❌ Even minimal allocation failed!");
+    return false;
+  }
+  
+  // Test avec 10x10 pixels
+  this->image_data_.clear();
+  this->width_ = 10;
+  this->height_ = 10;
+  size_t small_size = this->calculate_output_size();
+  
+  ESP_LOGI(TAG_IMAGE, "   Small size (10x10): %zu bytes", small_size);
+  
+  if (!this->allocate_image_buffer(small_size)) {
+    ESP_LOGE(TAG_IMAGE, "❌ Small allocation failed!");
+    return false;
+  }
+  
+  ESP_LOGI(TAG_IMAGE, "✅ Minimal allocations successful");
+  return true;
+}
+
+bool SdImageComponent::load_image_debug_safe() {
+  ESP_LOGI(TAG_IMAGE, "🐛 DEBUG SAFE IMAGE LOADING");
+  
+  // 1. Debug mémoire initial
+  this->debug_memory_usage();
+  
+  // 2. Test d'allocation minimale
+  if (!this->test_minimal_allocation()) {
+    return false;
+  }
+  
+  // 3. Libérer et essayer le vrai chargement
+  this->unload_image();
+  this->debug_memory_usage();
+  
+  // 4. Vérifier le fichier existe
+  if (!this->storage_component_ || !this->storage_component_->file_exists_direct(this->file_path_)) {
+    ESP_LOGE(TAG_IMAGE, "❌ File check failed: %s", this->file_path_.c_str());
+    return false;
+  }
+  
+  // 5. Lire seulement les premiers bytes pour vérification
+  std::vector<uint8_t> header_data = this->storage_component_->read_file_direct(this->file_path_);
+  if (header_data.size() < 16) {
+    ESP_LOGE(TAG_IMAGE, "❌ File too small: %zu bytes", header_data.size());
+    return false;
+  }
+  
+  ESP_LOGI(TAG_IMAGE, "✅ File validation OK: %zu bytes", header_data.size());
+  
+  // 6. Détection du type et extraction des dimensions sans décodage complet
+  if (this->is_jpeg_file(header_data)) {
+    int w, h;
+    if (this->extract_jpeg_dimensions(header_data, w, h)) {
+      ESP_LOGI(TAG_IMAGE, "📏 JPEG dimensions detected: %dx%d", w, h);
+      this->width_ = w;
+      this->height_ = h;
+    } else {
+      ESP_LOGW(TAG_IMAGE, "⚠️ Could not extract JPEG dimensions, using configured");
+    }
+    
+    // 7. Vérifier si on peut allouer cette taille
+    size_t needed_size = this->calculate_output_size();
+    ESP_LOGI(TAG_IMAGE, "💾 Memory needed: %zu bytes (%.1f KB)", needed_size, needed_size / 1024.0f);
+    
+    size_t free_total = esp_get_free_heap_size() + heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    if (needed_size > free_total * 0.7) { // Garder 30% de marge
+      ESP_LOGE(TAG_IMAGE, "❌ Insufficient memory for this image size");
+      ESP_LOGE(TAG_IMAGE, "   Need: %zu KB, Available: %zu KB", 
+               needed_size / 1024, free_total / 1024);
+      return false;
+    }
+    
+    // 8. Essayer le décodage simplifié
+    ESP_LOGI(TAG_IMAGE, "🔄 Attempting safe JPEG decode...");
+    return this->decode_jpeg_simple(header_data);
+  }
+  
+  ESP_LOGW(TAG_IMAGE, "⚠️ Non-JPEG file or unknown format");
+  return false;
+}
+
+void SdImageComponent::run_diagnostics() {
+  ESP_LOGI(TAG_IMAGE, "🔬 RUNNING SYSTEM DIAGNOSTICS");
+  
+  // Test mémoire de base
+  this->debug_memory_usage();
+  
+  // Test allocations
+  this->test_minimal_allocation();
+  
+  // Test lecture fichier
+  if (this->storage_component_) {
+    ESP_LOGI(TAG_IMAGE, "📁 Testing file system access...");
+    
+    // Lister le répertoire
+    this->list_directory_contents("/img");
+    
+    // Tester lecture du fichier
+    if (this->storage_component_->file_exists_direct(this->file_path_)) {
+      size_t file_size = this->storage_component_->get_file_size(this->file_path_);
+      ESP_LOGI(TAG_IMAGE, "✅ File accessible: %s (%zu bytes)", 
+               this->file_path_.c_str(), file_size);
+    } else {
+      ESP_LOGE(TAG_IMAGE, "❌ File not accessible: %s", this->file_path_.c_str());
+    }
+  }
+  
+  ESP_LOGI(TAG_IMAGE, "🔬 DIAGNOSTICS COMPLETE");
+}
 // =====================================================
 // DÉCODEUR PNG (fallback seulement pour l'instant)
 // =====================================================
