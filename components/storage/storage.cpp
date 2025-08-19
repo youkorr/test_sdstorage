@@ -1,15 +1,25 @@
 #include "storage.h"
 #include "esphome/core/log.h"
+#include "esphome/core/hal.h"
+#include "esphome/core/helpers.h"
 #include <sys/stat.h>
 #include <dirent.h>
 #include <errno.h>
 #include <algorithm>
+
+// Includes pour ESP32
+#ifdef ESP32
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#include <esp_task_wdt.h>
+#endif
 
 namespace esphome {
 namespace storage {
 
 static const char *const TAG = "storage";
 static const char *const TAG_IMAGE = "storage.image";
+
 
 // =====================================================
 // StorageComponent Implementation
@@ -480,6 +490,10 @@ bool SdImageComponent::decode_jpeg_tiled(const std::vector<uint8_t> &jpeg_data) 
   
   ESP_LOGI(TAG_IMAGE, "🔄 Processing %d tiles...", total_tiles);
   
+  // Variables pour le monitoring du watchdog
+  uint32_t last_yield_time = millis();
+  const uint32_t yield_interval = 100; // Yield toutes les 100ms
+  
   for (int y = 0; y < this->height_; y += tile_size) {
     for (int x = 0; x < this->width_; x += tile_size) {
       int tile_w = std::min(tile_size, this->width_ - x);
@@ -495,16 +509,28 @@ bool SdImageComponent::decode_jpeg_tiled(const std::vector<uint8_t> &jpeg_data) 
       
       tiles_processed++;
       
-      // Yield périodiquement pour éviter le watchdog
-      if (tiles_processed % 4 == 0) {
-        yield();
-        delay(1);
+      // Yield périodiquement pour éviter le watchdog (méthode ESPHome)
+      uint32_t current_time = millis();
+      if (current_time - last_yield_time >= yield_interval) {
+        App.feed_wdt(); // Méthode ESPHome pour nourrir le watchdog
+        last_yield_time = current_time;
+        
+        #ifdef ESP32
+        // Yield de la tâche ESP32 si disponible
+        vTaskDelay(1 / portTICK_PERIOD_MS);
+        #endif
       }
       
       // Affichage du progrès pour grandes images
       if (total_tiles > 20 && tiles_processed % (total_tiles / 10) == 0) {
         int progress = (tiles_processed * 100) / total_tiles;
         ESP_LOGI(TAG_IMAGE, "📊 Progress: %d%% (%d/%d tiles)", progress, tiles_processed, total_tiles);
+        
+        // Force un yield sur les grandes images
+        App.feed_wdt();
+        #ifdef ESP32
+        vTaskDelay(2 / portTICK_PERIOD_MS);
+        #endif
       }
     }
   }
