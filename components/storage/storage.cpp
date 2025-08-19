@@ -99,7 +99,15 @@ void SdImageComponent::setup() {
   ESP_LOGCONFIG(TAG_IMAGE, "  Format: %s", this->get_output_format_string().c_str());
   ESP_LOGCONFIG(TAG_IMAGE, "  Byte order: %s", this->get_byte_order_string().c_str());
   ESP_LOGCONFIG(TAG_IMAGE, "  Storage component: %s", this->storage_component_ ? "configured" : "not configured");
-  ESP_LOGCONFIG(TAG_IMAGE, "  Decoders: JPEGDEC available, PNG fallback");
+  
+  // Vérifier la disponibilité de JPEGDEC
+  #ifdef JPEGDEC_VERSION
+  ESP_LOGCONFIG(TAG_IMAGE, "  JPEGDEC version: %s", JPEGDEC_VERSION);
+  #else
+  ESP_LOGCONFIG(TAG_IMAGE, "  JPEGDEC version: detected");
+  #endif
+  ESP_LOGCONFIG(TAG_IMAGE, "  Real JPEG decoder: AVAILABLE");
+  ESP_LOGCONFIG(TAG_IMAGE, "  PNG decoder: FALLBACK ONLY");
   
   // Auto-load image if path is specified
   if (!this->file_path_.empty() && this->storage_component_) {
@@ -364,7 +372,7 @@ bool SdImageComponent::load_image_from_path(const std::string &path) {
 }
 
 // =====================================================
-// DÉCODEURS D'IMAGES
+// DÉCODEURS D'IMAGES - Version corrigée
 // =====================================================
 
 bool SdImageComponent::decode_jpeg_real(const std::vector<uint8_t> &jpeg_data) {
@@ -478,55 +486,21 @@ bool SdImageComponent::decode_jpeg_real(const std::vector<uint8_t> &jpeg_data) {
   return true;
 }
 
-// =====================================================
-// MÉTHODE DE SÉLECTION DU DÉCODEUR - Version corrigée
-// =====================================================
-
 bool SdImageComponent::decode_jpeg(const std::vector<uint8_t> &jpeg_data) {
   // Essayer d'abord le vrai décodeur JPEGDEC
   ESP_LOGI(TAG_IMAGE, "🔧 Attempting to use JPEGDEC library...");
   
-  try {
-    bool result = this->decode_jpeg_real(jpeg_data);
-    if (result) {
-      ESP_LOGI(TAG_IMAGE, "✅ JPEGDEC decoding successful");
-      return true;
-    } else {
-      ESP_LOGW(TAG_IMAGE, "⚠️ JPEGDEC decoding failed, trying fallback");
-    }
-  } catch (const std::exception &e) {
-    ESP_LOGE(TAG_IMAGE, "❌ JPEGDEC threw exception: %s", e.what());
-  } catch (...) {
-    ESP_LOGE(TAG_IMAGE, "❌ JPEGDEC threw unknown exception");
+  bool result = this->decode_jpeg_real(jpeg_data);
+  if (result) {
+    ESP_LOGI(TAG_IMAGE, "✅ JPEGDEC decoding successful");
+    return true;
+  } else {
+    ESP_LOGW(TAG_IMAGE, "⚠️ JPEGDEC decoding failed, trying fallback");
   }
   
   // Si JPEGDEC échoue, utiliser le fallback
   ESP_LOGW(TAG_IMAGE, "🔄 Falling back to test pattern decoder");
   return this->decode_jpeg_fallback(jpeg_data);
-}
-
-// =====================================================
-// VÉRIFICATION DE LA DISPONIBILITÉ DE JPEGDEC
-// =====================================================
-
-void SdImageComponent::setup() {
-  ESP_LOGCONFIG(TAG_IMAGE, "Setting up SD Image Component...");
-  ESP_LOGCONFIG(TAG_IMAGE, "  File path: %s", this->file_path_.c_str());
-  ESP_LOGCONFIG(TAG_IMAGE, "  Dimensions: %dx%d", this->width_, this->height_);
-  ESP_LOGCONFIG(TAG_IMAGE, "  Format: %s", this->get_output_format_string().c_str());
-  ESP_LOGCONFIG(TAG_IMAGE, "  Byte order: %s", this->get_byte_order_string().c_str());
-  ESP_LOGCONFIG(TAG_IMAGE, "  Storage component: %s", this->storage_component_ ? "configured" : "not configured");
-  
-  // Vérifier la disponibilité de JPEGDEC
-  ESP_LOGCONFIG(TAG_IMAGE, "  JPEGDEC version: %s", JPEGDEC_VERSION);
-  ESP_LOGCONFIG(TAG_IMAGE, "  Real JPEG decoder: AVAILABLE");
-  ESP_LOGCONFIG(TAG_IMAGE, "  PNG decoder: FALLBACK ONLY");
-  
-  // Auto-load image if path is specified
-  if (!this->file_path_.empty() && this->storage_component_) {
-    ESP_LOGI(TAG_IMAGE, "Auto-loading image from: %s", this->file_path_.c_str());
-    this->load_image();
-  }
 }
 
 // =====================================================
@@ -536,6 +510,22 @@ void SdImageComponent::setup() {
 bool SdImageComponent::decode_png_real(const std::vector<uint8_t> &png_data) {
   ESP_LOGW(TAG_IMAGE, "⚠️ Real PNG decoder not implemented yet");
   return false;
+}
+
+bool SdImageComponent::decode_png(const std::vector<uint8_t> &png_data) {
+  // On utilise le vrai décodeur si dispo, sinon le fallback
+  ESP_LOGI(TAG_IMAGE, "🔧 Attempting to use PNG decoder...");
+  
+  bool result = this->decode_png_real(png_data);
+  if (result) {
+    ESP_LOGI(TAG_IMAGE, "✅ PNG decoding successful");
+    return true;
+  } else {
+    ESP_LOGW(TAG_IMAGE, "⚠️ PNG decoding failed, trying fallback");
+  }
+  
+  // Fallback vers le pattern de test
+  return this->decode_png_fallback(png_data);
 }
 
 // =====================================================
@@ -897,23 +887,6 @@ bool SdImageComponent::validate_image_data() const {
   
   size_t expected_size = this->calculate_output_size();
   return this->image_data_.size() == expected_size;
-}
-bool SdImageComponent::decode_jpeg(const std::vector<uint8_t> &jpeg_data) {
-#ifdef USE_JPEGDEC
-  return this->decode_jpeg_real(jpeg_data);
-#else
-  return this->decode_jpeg_fallback(jpeg_data);
-#endif
-}
-
-
-bool SdImageComponent::decode_png(const std::vector<uint8_t> &png_data) {
-  // On utilise le vrai décodeur si dispo, sinon le fallback
-#ifdef USE_PNGDEC
-  return this->decode_png_real(png_data);
-#else
-  return this->decode_png_fallback(png_data);
-#endif
 }
 
 }  // namespace storage
