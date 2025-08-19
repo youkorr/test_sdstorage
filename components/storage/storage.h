@@ -228,13 +228,25 @@ class SdImageComponent : public Component, public image::Image {
   void generate_png_test_pattern(const std::vector<uint8_t> &source_data);
   
   // ===== VALIDATION METHODS =====
-  bool validate_dimensions() const;
-  bool validate_file_path() const;
+  bool validate_dimensions() const { return this->width_ > 0 && this->height_ > 0; }
+  bool validate_file_path() const { return !this->file_path_.empty(); }
   bool validate_pixel_access(int x, int y) const;
   
   // ===== UTILITY METHODS =====
-  std::string detect_file_type(const std::string &path) const;
-  bool is_supported_format(const std::string &extension) const;
+  std::string detect_file_type(const std::string &path) const {
+    size_t dot_pos = path.find_last_of('.');
+    if (dot_pos != std::string::npos) {
+      std::string ext = path.substr(dot_pos + 1);
+      std::transform(ext.begin(), ext.end(), ext.begin(), ::tolower);
+      return ext;
+    }
+    return "unknown";
+  }
+  
+  bool is_supported_format(const std::string &extension) const {
+    return extension == "jpg" || extension == "jpeg" || extension == "png";
+  }
+  
   void list_directory_contents(const std::string &dir_path);
 };
 
