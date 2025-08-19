@@ -58,7 +58,7 @@ class StorageComponent : public Component {
 class SdImageComponent : public Component, public image::Image {
  public:
   // Constructeur qui initialise la classe Image de base
-  SdImageComponent() : image::Image(nullptr, 0, 0, image::IMAGE_TYPE_RGB565) {}
+  SdImageComponent() : image::Image(nullptr, 0, 0, image::IMAGE_TYPE_RGB565, image::TRANSPARENCY_OPAQUE) {}
 
   // ===== MÉTHODES COMPONENT =====
   void setup() override;
@@ -74,28 +74,11 @@ class SdImageComponent : public Component, public image::Image {
     this->resize_height_ = height; 
   }
   
-  // ESPHome compatibility methods (to avoid configuration errors)
-  void set_output_format_string(const std::string &format) { 
-    ESP_LOGD("sd_image", "Output format set to: %s", format.c_str());
-  }
-  
-  void set_byte_order_string(const std::string &order) { 
-    ESP_LOGD("sd_image", "Byte order set to: %s", order.c_str());
-  }
-  
   // ===== MÉTHODES D'IMAGE DYNAMIQUE =====
   bool load_image();
   bool load_image_from_path(const std::string &path);
   void unload_image();
   bool reload_image();
-  
-  // Override Image methods for dynamic loading
-  const uint8_t *get_data_start() override {
-    if (!this->is_loaded_ || this->image_data_.empty()) {
-      return nullptr;
-    }
-    return this->image_data_.data();
-  }
   
   // ===== GETTERS SPÉCIFIQUES =====
   const std::string &get_file_path() const { return this->file_path_; }
@@ -131,8 +114,8 @@ class SdImageComponent : public Component, public image::Image {
   bool create_esphome_image_from_data(const std::vector<uint8_t> &processed_data, 
                                       int width, int height, 
                                       image::ImageType type);
-  void update_image_properties(int width, int height, 
-                               image::ImageType type);
+  void update_image_properties(const uint8_t* data, int width, int height, 
+                               image::ImageType type, image::Transparency transparency);
   
   // ===== DÉTECTION ET TRAITEMENT =====
   bool is_supported_image_format(const std::vector<uint8_t> &data) const;
