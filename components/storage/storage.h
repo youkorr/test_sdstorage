@@ -75,14 +75,6 @@ class StorageComponent : public Component {
   const std::string &get_platform() const { return this->platform_; }
   const std::string &get_root_path() const { return this->root_path_; }
   sd_mmc_card::SdMmc *get_sd_component() const { return this->sd_component_; }
-
-  const uint8_t *get_data() const override;
-  image::ImageType get_type() const override;
-  int get_width() const override;
-  int get_height() const override;
-  
-  // Méthode utilitaire pour le débogage
-  Color get_pixel_color(int x, int y) const;
   
  private:
   std::string platform_;
@@ -235,6 +227,7 @@ class SdImageUnloadAction : public Action<Ts...> {
 
 }  // namespace storage
 }  // namespace esphome
+
 
 
 
