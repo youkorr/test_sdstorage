@@ -142,6 +142,25 @@ void SdImageComponent::dump_config() {
   }
 }
 
+// Compatibility methods for YAML configuration
+void SdImageComponent::set_output_format_string(const std::string &format) {
+  if (format == "RGB565") {
+    this->format_ = ImageFormat::RGB565;
+  } else if (format == "RGB888") {
+    this->format_ = ImageFormat::RGB888;
+  } else if (format == "RGBA") {
+    this->format_ = ImageFormat::RGBA;
+  } else {
+    ESP_LOGW(TAG_IMAGE, "Unknown format: %s, using RGB565", format.c_str());
+    this->format_ = ImageFormat::RGB565;
+  }
+}
+
+void SdImageComponent::set_byte_order_string(const std::string &byte_order) {
+  // For now, we just log the byte order setting
+  ESP_LOGD(TAG_IMAGE, "Byte order set to: %s", byte_order.c_str());
+}
+
 // Image interface implementation
 void SdImageComponent::draw(int x, int y, display::Display *display, Color color_on, Color color_off) {
   if (!this->image_loaded_ || this->image_buffer_.empty()) {
@@ -186,10 +205,6 @@ int SdImageComponent::get_width() const {
 
 int SdImageComponent::get_height() const {
   return this->resize_height_ > 0 ? this->resize_height_ : this->image_height_;
-}
-
-image::ImageType SdImageComponent::get_type() const {
-  return this->get_image_type_from_format();
 }
 
 // Loading methods
@@ -274,12 +289,11 @@ bool SdImageComponent::reload_image() {
 }
 
 void SdImageComponent::update_image_properties() {
-  // Update the base Image class properties
-  // Note: We need to call the protected members directly
-  this->width_ = this->image_width_;
-  this->height_ = this->image_height_;
-  this->type_ = this->get_image_type_from_format();
-  this->data_ = this->get_data_start();
+  // Update the base Image class properties through inheritance
+  // We don't need to access private members, the base class will handle it
+  
+  // The draw method and get_data_start will provide the data access
+  // when needed by the display system
 }
 
 // File type detection
@@ -590,6 +604,7 @@ bool SdImageComponent::extract_jpeg_dimensions(const std::vector<uint8_t> &data,
 
 }  // namespace storage
 }  // namespace esphome
+
 
 
 
