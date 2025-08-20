@@ -87,8 +87,8 @@ class StorageComponent : public Component {
 // =====================================================
 class SdImageComponent : public Component, public image::Image {
  public:
-  // Constructor following ESPHome pattern
-  SdImageComponent() = default;
+  // Constructor following ESPHome pattern with proper Image initialization
+  SdImageComponent() : image::Image(nullptr, 0, 0, image::IMAGE_TYPE_RGB565) {}
 
   // Component lifecycle
   void setup() override;
@@ -106,13 +106,13 @@ class SdImageComponent : public Component, public image::Image {
   void set_format(ImageFormat format) { this->format_ = format; }
   void set_auto_load(bool auto_load) { this->auto_load_ = auto_load; }
   
-  // Image interface implementation
+  // Image interface implementation - correct override signatures
   void draw(int x, int y, display::Display *display, Color color_on, Color color_off) override;
   int get_width() const override;
   int get_height() const override;
-  ImageType get_type() const override;
+  image::ImageType get_type() const override;
   
-  // Image data access
+  // Image data access - correct override signature
   const uint8_t *get_data_start() const override { 
     return this->image_buffer_.empty() ? nullptr : this->image_buffer_.data(); 
   }
@@ -181,8 +181,11 @@ class SdImageComponent : public Component, public image::Image {
   bool extract_jpeg_dimensions(const std::vector<uint8_t> &data, int &width, int &height) const;
   
   // Format helpers
-  ImageType get_image_type_from_format() const;
+  image::ImageType get_image_type_from_format() const;
   std::string format_to_string() const;
+  
+  // Update image properties when loading
+  void update_image_properties();
 };
 
 // =====================================================
