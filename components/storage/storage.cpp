@@ -559,7 +559,72 @@ bool SdImageComponent::decode_jpeg_image(const std::vector<uint8_t> &jpeg_data) 
   return true;
 }
 
-
+int SdImageComponent::jpeg_decode_callback(JPEGDRAW *pDraw) {
+  // Get the current component instance
+  if (!current_image_component) {
+    ESP_LOGE(TAG_IMAGE, "No current image component in callback");
+    return 0; // Stop decoding
+  }
+  
+  SdImageComponent *component = current_image_component;
+  
+  // Validate draw parameters
+  if (!pDraw || !pDraw->pPixels) {
+    ESP_LOGE(TAG_IMAGE, "Invalid draw parameters in callback");
+    return 0;
+  }
+  
+  // Log progress occasionally
+  static int callback_count = 0;
+  if (++callback_count % 100 == 0) {
+    ESP_LOGD(TAG_IMAGE, "JPEG callback: %d,%d %dx%d", 
+             pDraw->x, pDraw->y, pDraw->iWidth, pDraw->iHeight);
+  }
+  
+  // Process pixels - JPEGDEC provides RGB565 pixels directly
+  uint16_t *pixels = (uint16_t *)pDraw->pPixels;
+  
+  for (int py = 0; py < pDraw->iHeight; py++) {
+    for (int px = 0; px < pDraw->iWidth; px++) {
+      int img_x = pDraw->x + px;
+      int img_y = pDraw->y + py;
+      
+      // Apply resize scaling if needed
+      if (component->resize_width_ > 0 && component->resize_height_ > 0) {
+        int orig_width = component->jpeg_decoder_->getWidth();
+        int orig_height = component->jpeg_decoder_->getHeight();
+        
+        if (orig_width > 0 && orig_height > 0) {
+          img_x = (img_x * component->resize_width_) / orig_width;
+          img_y = (img_y * component->resize_height_) / orig_height;
+        }
+      }
+      
+      // Bounds check
+      if (img_x >= 0 && img_x < component->image_width_ && 
+          img_y >= 0 && img_y < component->image_height_) {
+        
+        // Get RGB565 pixel
+        uint16_t rgb565 = pixels[py * pDraw->iWidth + px];
+        
+        // Store directly as RGB565 in buffer
+        size_t offset = (img_y * component->image_width_ + img_x) * 2;
+        if (offset + 1 < component->image_buffer_.size()) {
+          component->image_buffer_[offset] = rgb565 & 0xFF;
+          component->image_buffer_[offset + 1] = (rgb565 >> 8) & 0xFF;
+        }
+      }
+    }
+    
+    // Yield periodically to prevent watchdog timeout
+    if (py % 16 == 0) {
+      App.feed_wdt();
+      yield();
+    }
+  }
+  
+  return 1; // Continue decoding
+}
 bool SdImageComponent::jpeg_decode_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b) {
   // Apply resize scaling if needed
   if (this->resize_width_ > 0 && this->resize_height_ > 0) {
