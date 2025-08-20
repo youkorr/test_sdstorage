@@ -168,42 +168,34 @@ void SdImageComponent::draw(int x, int y, display::Display *display, Color color
     return;
   }
   
-  // Use ESPHome's optimized image drawing method
-  display->draw_image(x, y, this, color_on, color_off);
-}
-
-// Alternative pixel-by-pixel drawing for debugging
-void SdImageComponent::draw_pixel_by_pixel(int x, int y, display::Display *display) {
-  if (!this->image_loaded_ || this->image_buffer_.empty()) {
-    return;
-  }
-  
-  ESP_LOGI(TAG_IMAGE, "Drawing pixel by pixel: %dx%d", this->image_width_, this->image_height_);
-  
-  for (int img_y = 0; img_y < this->image_height_; img_y++) {
-    for (int img_x = 0; img_x < this->image_width_; img_x++) {
-      Color pixel_color = this->get_pixel_color(img_x, img_y);
-      display->draw_pixel_at(x + img_x, y + img_y, pixel_color);
+  // Use ESPHome's image drawing
+  for (int img_x = 0; img_x < this->image_width_; img_x++) {
+    for (int img_y = 0; img_y < this->image_height_; img_y++) {
+      size_t offset = (img_y * this->image_width_ + img_x) * this->get_pixel_size();
+      
+      if (offset + this->get_pixel_size() <= this->image_buffer_.size()) {
+        Color pixel_color;
+        
+        if (this->format_ == ImageFormat::RGB565) {
+          uint16_t rgb565 = this->image_buffer_[offset] | (this->image_buffer_[offset + 1] << 8);
+          uint8_t r = (rgb565 >> 11) << 3;
+          uint8_t g = ((rgb565 >> 5) & 0x3F) << 2;
+          uint8_t b = (rgb565 & 0x1F) << 3;
+          pixel_color = Color(r, g, b);
+        } else if (this->format_ == ImageFormat::RGB888) {
+          pixel_color = Color(this->image_buffer_[offset], 
+                            this->image_buffer_[offset + 1], 
+                            this->image_buffer_[offset + 2]);
+        } else if (this->format_ == ImageFormat::RGBA) {
+          pixel_color = Color(this->image_buffer_[offset], 
+                            this->image_buffer_[offset + 1], 
+                            this->image_buffer_[offset + 2], 
+                            this->image_buffer_[offset + 3]);
+        }
+        
+        display->draw_pixel_at(x + img_x, y + img_y, pixel_color);
+      }
     }
-    
-    // Small delay to avoid blocking the system
-    if (img_y % 10 == 0) {
-      delay(1);
-    }
-  }
-}
-
-// Required image methods
-const uint8_t *SdImageComponent::get_data() const {
-  return this->image_buffer_.data();
-}
-
-image::ImageType SdImageComponent::get_type() const {
-  switch (this->format_) {
-    case ImageFormat::RGB565: return image::IMAGE_TYPE_RGB565;
-    case ImageFormat::RGB888: return image::IMAGE_TYPE_RGB24;
-    case ImageFormat::RGBA: return image::IMAGE_TYPE_RGBA;
-    default: return image::IMAGE_TYPE_RGB565;
   }
 }
 
@@ -213,41 +205,6 @@ int SdImageComponent::get_width() const {
 
 int SdImageComponent::get_height() const {
   return this->resize_height_ > 0 ? this->resize_height_ : this->image_height_;
-}
-
-// Get pixel color with proper conversion
-Color SdImageComponent::get_pixel_color(int x, int y) const {
-  if (x < 0 || x >= this->image_width_ || y < 0 || y >= this->image_height_) {
-    return Color::BLACK;
-  }
-  
-  size_t offset = (y * this->image_width_ + x) * this->get_pixel_size();
-  
-  if (offset + this->get_pixel_size() > this->image_buffer_.size()) {
-    return Color::BLACK;
-  }
-  
-  switch (this->format_) {
-    case ImageFormat::RGB565: {
-      uint16_t rgb565 = this->image_buffer_[offset] | (this->image_buffer_[offset + 1] << 8);
-      // Correct RGB565 to RGB888 conversion
-      uint8_t r = ((rgb565 >> 11) & 0x1F) * 255 / 31;
-      uint8_t g = ((rgb565 >> 5) & 0x3F) * 255 / 63;
-      uint8_t b = (rgb565 & 0x1F) * 255 / 31;
-      return Color(r, g, b);
-    }
-    case ImageFormat::RGB888:
-      return Color(this->image_buffer_[offset], 
-                  this->image_buffer_[offset + 1], 
-                  this->image_buffer_[offset + 2]);
-    case ImageFormat::RGBA:
-      return Color(this->image_buffer_[offset], 
-                  this->image_buffer_[offset + 1], 
-                  this->image_buffer_[offset + 2], 
-                  this->image_buffer_[offset + 3]);
-    default:
-      return Color::BLACK;
-  }
 }
 
 // Loading methods
@@ -310,12 +267,6 @@ bool SdImageComponent::load_image_from_path(const std::string &path) {
   
   ESP_LOGI(TAG_IMAGE, "Image loaded successfully: %dx%d, %zu bytes", 
            this->image_width_, this->image_height_, this->image_buffer_.size());
-  
-  // Debug: show first few pixels
-  ESP_LOGI(TAG_IMAGE, "First few pixels after decode:");
-  for (int i = 0; i < 10 && i < this->image_buffer_.size(); i++) {
-    ESP_LOGI(TAG_IMAGE, "Buffer[%d] = 0x%02X", i, this->image_buffer_[i]);
-  }
   
   return true;
 }
@@ -570,6 +521,15 @@ size_t SdImageComponent::get_pixel_size() const {
 
 size_t SdImageComponent::get_buffer_size() const {
   return this->image_width_ * this->image_height_ * this->get_pixel_size();
+}
+
+image::ImageType SdImageComponent::get_image_type_from_format() const {
+  switch (this->format_) {
+    case ImageFormat::RGB565: return image::IMAGE_TYPE_RGB565;
+    case ImageFormat::RGB888: return image::IMAGE_TYPE_RGB;  // Use RGB instead of RGB24
+    case ImageFormat::RGBA: return image::IMAGE_TYPE_RGB;    // Use RGB instead of RGBA
+    default: return image::IMAGE_TYPE_RGB565;
+  }
 }
 
 std::string SdImageComponent::format_to_string() const {
