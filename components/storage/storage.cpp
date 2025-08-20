@@ -1,4 +1,3 @@
-
 #include "storage.h"
 #include "esphome/core/log.h"
 #include <sys/stat.h>
@@ -611,15 +610,6 @@ size_t SdImageComponent::get_pixel_size() const {
 
 size_t SdImageComponent::get_buffer_size() const {
   return this->image_width_ * this->image_height_ * this->get_pixel_size();
-}
-
-image::ImageType SdImageComponent::get_image_type_from_format() const {
-  switch (this->format_) {
-    case ImageFormat::RGB565: return image::IMAGE_TYPE_RGB565;
-    case ImageFormat::RGB888: return image::IMAGE_TYPE_RGB;  // Use RGB instead of RGB24
-    case ImageFormat::RGBA: return image::IMAGE_TYPE_RGB;    // Use RGB instead of RGBA
-    default: return image::IMAGE_TYPE_RGB565;
-  }
 }
 
 std::string SdImageComponent::format_to_string() const {
