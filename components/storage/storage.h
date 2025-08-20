@@ -12,32 +12,25 @@
 #include "esphome/components/display/display.h"
 #include "../sd_mmc_card/sd_mmc_card.h"
 
-// ESP-IDF image decoder support
+// Image decoder configuration for ESP-IDF
 #ifdef ESP_IDF_VERSION
-  #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
-    #define USE_ESP_IDF_IMAGE_DECODERS
-    // ESP-IDF has built-in JPEG decoder
-    #include "esp_jpg_decode.h"
-    // For PNG, we'll use fallback for now
-    // #include "esp_png_decode.h" // Not available yet in ESP-IDF
-  #endif
+  // Use JPEGDEC library which works with ESP-IDF
+  #define USE_JPEGDEC
+  // Disable PNG for now as it's more complex to get working
+  // #define USE_PNGDEC
+#else
+  // Arduino framework
+  #define USE_JPEGDEC
+  // #define USE_PNGDEC
 #endif
 
-// Fallback to Arduino libraries if not ESP-IDF
-#ifndef USE_ESP_IDF_IMAGE_DECODERS
-  // Only enable these for Arduino framework
-  #ifdef ARDUINO
-    #define USE_JPEGDEC
-    // #define USE_PNGDEC  // Disable PNG for now
-    
-    #ifdef USE_JPEGDEC
-    #include <JPEGDEC.h>
-    #endif
-    
-    #ifdef USE_PNGDEC
-    #include <PNGDEC.h>
-    #endif
-  #endif
+// Image decoders
+#ifdef USE_JPEGDEC
+#include <JPEGDEC.h>
+#endif
+
+#ifdef USE_PNGDEC
+#include <PNGDEC.h>
 #endif
 
 namespace esphome {
@@ -96,7 +89,7 @@ class StorageComponent : public Component {
 };
 
 // =====================================================
-// SdImageComponent - SD Image Component with ESP-IDF Support
+// SdImageComponent - SD Image Component
 // =====================================================
 class SdImageComponent : public Component, public image::Image {
  public:
@@ -220,19 +213,9 @@ class SdImageComponent : public Component, public image::Image {
   bool decode_png(const std::vector<uint8_t> &png_data);
   bool load_raw_data(const std::vector<uint8_t> &raw_data);
   
-  // ===== ESP-IDF IMAGE DECODERS =====
-#ifdef USE_ESP_IDF_IMAGE_DECODERS
-  bool decode_jpeg_esp_idf(const std::vector<uint8_t> &jpeg_data);
-#endif
-  
-  // ===== ARDUINO LIBRARY DECODERS =====
-#ifdef USE_JPEGDEC
-  bool decode_jpeg_jpegdec(const std::vector<uint8_t> &jpeg_data);
-#endif
-
-#ifdef USE_PNGDEC  
-  bool decode_png_pngdec(const std::vector<uint8_t> &png_data);
-#endif
+  // ===== REAL IMAGE DECODERS =====
+  bool decode_jpeg_real(const std::vector<uint8_t> &jpeg_data);
+  bool decode_png_real(const std::vector<uint8_t> &png_data);
   
   // ===== FALLBACK DECODERS (test patterns) =====
   bool decode_jpeg_fallback(const std::vector<uint8_t> &jpeg_data);
@@ -269,15 +252,26 @@ class SdImageComponent : public Component, public image::Image {
   std::string detect_file_type(const std::string &path) const;
   bool is_supported_format(const std::string &extension) const;
   void list_directory_contents(const std::string &dir_path);
+  
+  // ===== TEMPORARY DATA FOR DECODERS =====
+  std::vector<uint8_t> *jpeg_data_ptr_{nullptr};
+  size_t jpeg_position_{0};
+  
+#ifdef USE_PNGDEC  
+  PNG png_decoder_;
+#endif
 };
 
-// ===== ACTION CLASSES =====
+// =====================================================
+// ACTION CLASSES - SdImageLoadAction
+// =====================================================
 template<typename... Ts> 
 class SdImageLoadAction : public Action<Ts...> {
  public:
   SdImageLoadAction() = default;
   explicit SdImageLoadAction(SdImageComponent *parent) : parent_(parent) {}
   
+  // Template value for file path
   TEMPLATABLE_VALUE(std::string, file_path)
   
   void set_parent(SdImageComponent *parent) { this->parent_ = parent; }
@@ -288,6 +282,7 @@ class SdImageLoadAction : public Action<Ts...> {
       return;
     }
     
+    // If a file path is provided in the action
     if (this->file_path_.has_value()) {
       std::string path = this->file_path_.value(x...);
       if (!path.empty()) {
@@ -299,6 +294,7 @@ class SdImageLoadAction : public Action<Ts...> {
       }
     }
     
+    // Otherwise, use the configured path
     ESP_LOGD("sd_image.load", "Loading image from configured path");
     if (!this->parent_->load_image()) {
       ESP_LOGE("sd_image.load", "Failed to load image from configured path");
@@ -309,6 +305,9 @@ class SdImageLoadAction : public Action<Ts...> {
   SdImageComponent *parent_{nullptr};
 };
 
+// =====================================================
+// ACTION CLASSES - SdImageUnloadAction
+// =====================================================
 template<typename... Ts> 
 class SdImageUnloadAction : public Action<Ts...> {
  public:
