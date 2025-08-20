@@ -188,7 +188,7 @@ int SdImageComponent::get_height() const {
   return this->resize_height_ > 0 ? this->resize_height_ : this->image_height_;
 }
 
-ImageType SdImageComponent::get_type() const {
+image::ImageType SdImageComponent::get_type() const {
   return this->get_image_type_from_format();
 }
 
@@ -247,6 +247,9 @@ bool SdImageComponent::load_image_from_path(const std::string &path) {
   this->file_path_ = path;
   this->image_loaded_ = true;
   
+  // Update the base Image class properties
+  this->update_image_properties();
+  
   ESP_LOGI(TAG_IMAGE, "Image loaded successfully: %dx%d, %zu bytes", 
            this->image_width_, this->image_height_, this->image_buffer_.size());
   
@@ -259,12 +262,24 @@ void SdImageComponent::unload_image() {
   this->image_loaded_ = false;
   this->image_width_ = 0;
   this->image_height_ = 0;
+  
+  // Update base Image class
+  this->update_image_properties();
 }
 
 bool SdImageComponent::reload_image() {
   std::string path = this->file_path_;
   this->unload_image();
   return this->load_image_from_path(path);
+}
+
+void SdImageComponent::update_image_properties() {
+  // Update the base Image class properties
+  // Note: We need to call the protected members directly
+  this->width_ = this->image_width_;
+  this->height_ = this->image_height_;
+  this->type_ = this->get_image_type_from_format();
+  this->data_ = this->get_data_start();
 }
 
 // File type detection
@@ -494,11 +509,11 @@ size_t SdImageComponent::get_buffer_size() const {
   return this->image_width_ * this->image_height_ * this->get_pixel_size();
 }
 
-ImageType SdImageComponent::get_image_type_from_format() const {
+image::ImageType SdImageComponent::get_image_type_from_format() const {
   switch (this->format_) {
     case ImageFormat::RGB565: return image::IMAGE_TYPE_RGB565;
-    case ImageFormat::RGB888: return image::IMAGE_TYPE_RGB24;
-    case ImageFormat::RGBA: return image::IMAGE_TYPE_RGBA;
+    case ImageFormat::RGB888: return image::IMAGE_TYPE_RGB;  // Use RGB instead of RGB24
+    case ImageFormat::RGBA: return image::IMAGE_TYPE_RGB;    // Use RGB instead of RGBA
     default: return image::IMAGE_TYPE_RGB565;
   }
 }
