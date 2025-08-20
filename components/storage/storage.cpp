@@ -1,9 +1,23 @@
 #include "storage.h"
 #include "esphome/core/log.h"
+#include "esphome/core/application.h"  // For App.feed_wdt()
 #include <sys/stat.h>
 #include <dirent.h>
 #include <errno.h>
 #include <algorithm>
+
+// Include yield function for ESP32/ESP8266
+#ifdef ESP32
+#include <freertos/FreeRTOS.h>
+#include <freertos/task.h>
+#define yield() taskYIELD()
+#elif defined(ESP8266)
+#include <Esp.h>
+// yield() is already available on ESP8266
+#else
+// Fallback for other platforms
+#define yield() delayMicroseconds(1)
+#endif
 
 namespace esphome {
 namespace storage {
