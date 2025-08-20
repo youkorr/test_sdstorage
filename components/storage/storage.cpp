@@ -1,3 +1,4 @@
+
 #include "storage.h"
 #include "esphome/core/log.h"
 #include <sys/stat.h>
@@ -139,6 +140,8 @@ void SdImageComponent::dump_config() {
   ESP_LOGCONFIG(TAG_IMAGE, "  Loaded: %s", this->image_loaded_ ? "YES" : "NO");
   if (this->image_loaded_) {
     ESP_LOGCONFIG(TAG_IMAGE, "  Buffer size: %zu bytes", this->image_buffer_.size());
+    ESP_LOGCONFIG(TAG_IMAGE, "  Base Image - W:%d H:%d Type:%d Data:%p", 
+                  this->width_, this->height_, this->type_, this->data_start_);
   }
 }
 
@@ -157,105 +160,30 @@ void SdImageComponent::set_output_format_string(const std::string &format) {
 }
 
 void SdImageComponent::set_byte_order_string(const std::string &byte_order) {
-  // For now, we just log the byte order setting
   ESP_LOGD(TAG_IMAGE, "Byte order set to: %s", byte_order.c_str());
 }
 
-// Image interface implementation
-// Remplacer la méthode draw() dans storage.cpp
-
+// CRITIQUE: Implémentation de la méthode draw() selon le code source ESPHome
 void SdImageComponent::draw(int x, int y, display::Display *display, Color color_on, Color color_off) {
   if (!this->image_loaded_ || this->image_buffer_.empty()) {
     ESP_LOGW(TAG_IMAGE, "Cannot draw: image not loaded");
     return;
   }
   
-  ESP_LOGD(TAG_IMAGE, "Drawing image %dx%d at position %d,%d", 
-           this->image_width_, this->image_height_, x, y);
+  ESP_LOGD(TAG_IMAGE, "Drawing SD image %dx%d at position %d,%d (Base: W:%d H:%d Data:%p)", 
+           this->get_current_width(), this->get_current_height(), x, y,
+           this->width_, this->height_, this->data_start_);
   
-  // Pour les grands écrans, utiliser une méthode plus efficace
-  if (this->image_width_ > 320 || this->image_height_ > 240) {
-    // Dessiner par chunks pour éviter les timeouts
-    const int CHUNK_HEIGHT = 32;
-    
-    for (int chunk_y = 0; chunk_y < this->image_height_; chunk_y += CHUNK_HEIGHT) {
-      int chunk_height = std::min(CHUNK_HEIGHT, this->image_height_ - chunk_y);
-      
-      for (int chunk_x = 0; chunk_x < this->image_width_; chunk_x += 64) {
-        int chunk_width = std::min(64, this->image_width_ - chunk_x);
-        
-        // Dessiner le chunk
-        for (int cy = 0; cy < chunk_height; cy++) {
-          for (int cx = 0; cx < chunk_width; cx++) {
-            int img_x = chunk_x + cx;
-            int img_y = chunk_y + cy;
-            
-            this->draw_pixel_at(display, x + img_x, y + img_y, img_x, img_y);
-          }
-        }
-        
-        // Yield pour éviter le watchdog timeout
-        //delay(0);
-      }
-    }
+  // CRITIQUE: Si les données de base sont correctes, utiliser la méthode optimisée d'ESPHome
+  if (this->data_start_ && this->width_ > 0 && this->height_ > 0) {
+    ESP_LOGD(TAG_IMAGE, "Using ESPHome base image draw method");
+    // Appeler la méthode de base qui gère le clipping et l'optimisation
+    image::Image::draw(x, y, display, color_on, color_off);
   } else {
-    // Méthode standard pour les petites images
-    for (int img_y = 0; img_y < this->image_height_; img_y++) {
-      for (int img_x = 0; img_x < this->image_width_; img_x++) {
-        this->draw_pixel_at(display, x + img_x, y + img_y, img_x, img_y);
-      }
-      
-      //if (img_y % 16 == 0) delay(0)// Yield périodique
-    }
+    ESP_LOGD(TAG_IMAGE, "Using fallback pixel-by-pixel drawing");
+    // Fallback: dessiner pixel par pixel
+    this->draw_pixels_directly(x, y, display, color_on, color_off);
   }
-  
-  ESP_LOGD(TAG_IMAGE, "Image drawing completed");
-}
-
-// Nouvelle méthode helper pour dessiner un pixel
-void SdImageComponent::draw_pixel_at(display::Display *display, int screen_x, int screen_y, int img_x, int img_y) {
-  size_t offset = (img_y * this->image_width_ + img_x) * this->get_pixel_size();
-  
-  if (offset + this->get_pixel_size() > this->image_buffer_.size()) {
-    return;
-  }
-  
-  Color pixel_color;
-  
-  switch (this->format_) {
-    case ImageFormat::RGB565: {
-      uint16_t rgb565 = this->image_buffer_[offset] | (this->image_buffer_[offset + 1] << 8);
-      uint8_t r = ((rgb565 >> 11) & 0x1F) << 3;
-      uint8_t g = ((rgb565 >> 5) & 0x3F) << 2;
-      uint8_t b = (rgb565 & 0x1F) << 3;
-      pixel_color = Color(r, g, b);
-      break;
-    }
-    case ImageFormat::RGB888:
-      pixel_color = Color(this->image_buffer_[offset], 
-                        this->image_buffer_[offset + 1], 
-                        this->image_buffer_[offset + 2]);
-      break;
-    case ImageFormat::RGBA:
-      pixel_color = Color(this->image_buffer_[offset], 
-                        this->image_buffer_[offset + 1], 
-                        this->image_buffer_[offset + 2], 
-                        this->image_buffer_[offset + 3]);
-      break;
-    default:
-      return;
-  }
-  
-  display->draw_pixel_at(screen_x, screen_y, pixel_color);
-}
-
-
-int SdImageComponent::get_width() const {
-  return this->resize_width_ > 0 ? this->resize_width_ : this->image_width_;
-}
-
-int SdImageComponent::get_height() const {
-  return this->resize_height_ > 0 ? this->resize_height_ : this->image_height_;
 }
 
 // Loading methods
@@ -313,8 +241,8 @@ bool SdImageComponent::load_image_from_path(const std::string &path) {
   this->file_path_ = path;
   this->image_loaded_ = true;
   
-  // Update the base Image class properties
-  this->update_image_properties();
+  // CRITIQUE: Finaliser le chargement en mettant à jour les propriétés de base
+  this->finalize_image_load();
   
   ESP_LOGI(TAG_IMAGE, "Image loaded successfully: %dx%d, %zu bytes", 
            this->image_width_, this->image_height_, this->image_buffer_.size());
@@ -329,8 +257,11 @@ void SdImageComponent::unload_image() {
   this->image_width_ = 0;
   this->image_height_ = 0;
   
-  // Update base Image class
-  this->update_image_properties();
+  // CRITIQUE: Réinitialiser aussi les propriétés de la classe de base
+  this->width_ = 0;
+  this->height_ = 0;
+  this->data_start_ = nullptr;
+  this->bpp_ = 0;
 }
 
 bool SdImageComponent::reload_image() {
@@ -339,12 +270,120 @@ bool SdImageComponent::reload_image() {
   return this->load_image_from_path(path);
 }
 
-void SdImageComponent::update_image_properties() {
-  // Update the base Image class properties through inheritance
-  // We don't need to access private members, the base class will handle it
+// CRITIQUE: Implémentation de finalize_image_load()
+void SdImageComponent::finalize_image_load() {
+  if (this->image_loaded_) {
+    this->update_base_image_properties();
+    ESP_LOGI(TAG_IMAGE, "Image properties updated - W:%d H:%d Type:%d Data:%p BPP:%d", 
+             this->width_, this->height_, this->type_, this->data_start_, this->bpp_);
+  }
+}
+
+// CRITIQUE: Mise à jour des propriétés de la classe de base selon le code source ESPHome
+void SdImageComponent::update_base_image_properties() {
+  // Mettre à jour les membres de la classe de base
+  this->width_ = this->get_current_width();
+  this->height_ = this->get_current_height();
+  this->type_ = this->get_esphome_image_type();
   
-  // The draw method and get_data_start will provide the data access
-  // when needed by the display system
+  if (!this->image_buffer_.empty()) {
+    this->data_start_ = this->image_buffer_.data();
+    
+    // CRITIQUE: Calculer bpp selon le code source ESPHome
+    switch (this->type_) {
+      case image::IMAGE_TYPE_BINARY:
+        this->bpp_ = 1;
+        break;
+      case image::IMAGE_TYPE_GRAYSCALE:
+        this->bpp_ = 8;
+        break;
+      case image::IMAGE_TYPE_RGB565:
+        this->bpp_ = 16;
+        break;
+      case image::IMAGE_TYPE_RGB:
+        this->bpp_ = 24;
+        break;
+      default:
+        this->bpp_ = 16;
+        break;
+    }
+  } else {
+    this->data_start_ = nullptr;
+    this->bpp_ = 0;
+  }
+}
+
+int SdImageComponent::get_current_width() const {
+  return this->resize_width_ > 0 ? this->resize_width_ : this->image_width_;
+}
+
+int SdImageComponent::get_current_height() const {
+  return this->resize_height_ > 0 ? this->resize_height_ : this->image_height_;
+}
+
+image::ImageType SdImageComponent::get_esphome_image_type() const {
+  switch (this->format_) {
+    case ImageFormat::RGB565: return image::IMAGE_TYPE_RGB565;
+    case ImageFormat::RGB888: return image::IMAGE_TYPE_RGB;
+    case ImageFormat::RGBA: return image::IMAGE_TYPE_RGB; // ESPHome n'a pas de RGBA natif
+    default: return image::IMAGE_TYPE_RGB565;
+  }
+}
+
+void SdImageComponent::draw_pixels_directly(int x, int y, display::Display *display, Color color_on, Color color_off) {
+  // Méthode de fallback pour dessiner directement
+  ESP_LOGD(TAG_IMAGE, "Drawing %dx%d pixels directly", this->get_current_width(), this->get_current_height());
+  
+  for (int img_y = 0; img_y < this->get_current_height(); img_y++) {
+    for (int img_x = 0; img_x < this->get_current_width(); img_x++) {
+      Color pixel_color = this->get_pixel_color(img_x, img_y);
+      display->draw_pixel_at(x + img_x, y + img_y, pixel_color);
+    }
+    
+    // Yield périodique pour éviter le watchdog
+    if (img_y % 32 == 0) {
+      App.feed_wdt();
+      yield();
+    }
+  }
+}
+
+void SdImageComponent::draw_pixel_at(display::Display *display, int screen_x, int screen_y, int img_x, int img_y) {
+  Color pixel_color = this->get_pixel_color(img_x, img_y);
+  display->draw_pixel_at(screen_x, screen_y, pixel_color);
+}
+
+Color SdImageComponent::get_pixel_color(int x, int y) const {
+  if (x < 0 || x >= this->get_current_width() || y < 0 || y >= this->get_current_height()) {
+    return Color::BLACK;
+  }
+  
+  size_t offset = (y * this->get_current_width() + x) * this->get_pixel_size();
+  
+  if (offset + this->get_pixel_size() > this->image_buffer_.size()) {
+    return Color::BLACK;
+  }
+  
+  switch (this->format_) {
+    case ImageFormat::RGB565: {
+      uint16_t rgb565 = this->image_buffer_[offset] | (this->image_buffer_[offset + 1] << 8);
+      uint8_t r = ((rgb565 >> 11) & 0x1F) << 3;
+      uint8_t g = ((rgb565 >> 5) & 0x3F) << 2;
+      uint8_t b = (rgb565 & 0x1F) << 3;
+      return Color(r, g, b);
+    }
+    case ImageFormat::RGB888:
+      return Color(this->image_buffer_[offset], 
+                  this->image_buffer_[offset + 1], 
+                  this->image_buffer_[offset + 2]);
+    case ImageFormat::RGBA:
+      return Color(this->image_buffer_[offset], 
+                  this->image_buffer_[offset + 1], 
+                  this->image_buffer_[offset + 2], 
+                  this->image_buffer_[offset + 3]);
+    default:
+      return Color::BLACK;
+  }
 }
 
 // File type detection
