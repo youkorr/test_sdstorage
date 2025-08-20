@@ -44,20 +44,47 @@ std::vector<uint8_t> StorageComponent::read_file_direct(const std::string &path)
   FILE *file = fopen(full_path.c_str(), "rb");
   
   if (!file) {
-    ESP_LOGE(TAG, "Failed to open file: %s", full_path.c_str());
+    ESP_LOGE(TAG, "Failed to open file: %s (errno: %d)", full_path.c_str(), errno);
     return {};
   }
   
-  fseek(file, 0, SEEK_END);
-  size_t size = ftell(file);
-  fseek(file, 0, SEEK_SET);
+  // Get file size safely
+  if (fseek(file, 0, SEEK_END) != 0) {
+    ESP_LOGE(TAG, "Failed to seek to end of file: %s", full_path.c_str());
+    fclose(file);
+    return {};
+  }
   
-  std::vector<uint8_t> data(size);
+  long size = ftell(file);
+  if (size < 0) {
+    ESP_LOGE(TAG, "Failed to get file size: %s", full_path.c_str());
+    fclose(file);
+    return {};
+  }
+  
+  if (fseek(file, 0, SEEK_SET) != 0) {
+    ESP_LOGE(TAG, "Failed to seek to beginning of file: %s", full_path.c_str());
+    fclose(file);
+    return {};
+  }
+  
+  // Limit file size to prevent memory issues
+  const size_t MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
+  if (size > MAX_FILE_SIZE) {
+    ESP_LOGE(TAG, "File too large: %ld bytes (max: %zu)", size, MAX_FILE_SIZE);
+    fclose(file);
+    return {};
+  }
+  
+  std::vector<uint8_t> data;
+  data.reserve(size);
+  data.resize(size);
+  
   size_t read_size = fread(data.data(), 1, size, file);
   fclose(file);
   
-  if (read_size != size) {
-    ESP_LOGE(TAG, "Failed to read complete file: expected %zu, got %zu", size, read_size);
+  if (read_size != static_cast<size_t>(size)) {
+    ESP_LOGE(TAG, "Failed to read complete file: expected %ld, got %zu", size, read_size);
     return {};
   }
   
@@ -364,98 +391,170 @@ bool SdImageComponent::load_image_from_path(const std::string &path) {
 }
 
 // =====================================================
-// DÉCODEURS D'IMAGES
+// JPEG CALLBACK METHOD - STACK SAFE
 // =====================================================
 
-bool SdImageComponent::decode_jpeg_real(const std::vector<uint8_t> &jpeg_data) {
-  ESP_LOGI(TAG_IMAGE, "Using JPEGDEC library for real JPEG decoding");
+int SdImageComponent::jpeg_draw_callback(JPEGDRAW *pDraw) {
+  if (!this->jpeg_decode_buffer_ || !pDraw || this->jpeg_decode_error_) {
+    ESP_LOGE(TAG_IMAGE, "JPEG callback: invalid state");
+    return 0;
+  }
   
-#ifdef USE_JPEGDEC
-  JPEGDEC jpeg;
+  // Bounds checking to prevent crashes
+  if (pDraw->x < 0 || pDraw->y < 0 || 
+      pDraw->x >= this->jpeg_decode_width_ || 
+      pDraw->y >= this->jpeg_decode_height_) {
+    ESP_LOGW(TAG_IMAGE, "JPEG callback: invalid coordinates (%d,%d)", pDraw->x, pDraw->y);
+    return 1; // Continue anyway
+  }
   
-  // Callback for receiving decoded pixels
-  static std::vector<uint8_t> *target_buffer = nullptr;
-  static int target_width = 0;
-  static int target_height = 0;
-  static SdImageComponent* target_component = nullptr;
+  // Process pixels in small chunks to avoid stack overflow
+  const int CHUNK_SIZE = 32; // Process max 32 pixels at a time
+  int pixels_processed = 0;
+  int total_pixels = pDraw->iWidth * pDraw->iHeight;
   
-  // Lambda function for decoding callback
-  auto draw_callback = [](JPEGDRAW *pDraw) -> int {
-    if (!target_buffer || !pDraw || !target_component) return 0;
+  while (pixels_processed < total_pixels) {
+    int chunk_pixels = std::min(CHUNK_SIZE, total_pixels - pixels_processed);
     
-    // Copy RGB888 pixels to our buffer
-    int y_start = pDraw->y;
-    int x_start = pDraw->x;
-    int width = pDraw->iWidth;
-    int height = pDraw->iHeight;
-    
-    for (int y = 0; y < height; y++) {
-      for (int x = 0; x < width; x++) {
-        int src_offset = (y * width + x) * 3; // RGB888
-        int dst_x = x_start + x;
-        int dst_y = y_start + y;
+    for (int i = 0; i < chunk_pixels; i++) {
+      int pixel_idx = pixels_processed + i;
+      int x_in_block = pixel_idx % pDraw->iWidth;
+      int y_in_block = pixel_idx / pDraw->iWidth;
+      
+      int dst_x = pDraw->x + x_in_block;
+      int dst_y = pDraw->y + y_in_block;
+      
+      // Bounds check for destination
+      if (dst_x >= 0 && dst_x < this->jpeg_decode_width_ && 
+          dst_y >= 0 && dst_y < this->jpeg_decode_height_) {
         
-        if (dst_x < target_width && dst_y < target_height) {
+        int src_offset = pixel_idx * 3; // RGB888 from JPEGDEC
+        if (src_offset + 2 < pDraw->iWidth * pDraw->iHeight * 3) {
           uint8_t r = pDraw->pPixels[src_offset + 0];
           uint8_t g = pDraw->pPixels[src_offset + 1];
           uint8_t b = pDraw->pPixels[src_offset + 2];
           
-          size_t offset = target_component->get_pixel_offset(dst_x, dst_y);
-          target_component->set_pixel_at_offset(offset, r, g, b, 255);
+          size_t offset = this->get_pixel_offset(dst_x, dst_y);
+          if (offset < this->jpeg_decode_buffer_->size()) {
+            this->set_pixel_at_offset(offset, r, g, b, 255);
+          }
         }
       }
     }
-    return 1; // Continue
-  };
+    
+    pixels_processed += chunk_pixels;
+    
+    // Yield occasionally to prevent watchdog timeout
+    if (pixels_processed % 64 == 0) {
+      yield();
+    }
+  }
   
-  // Open the JPEG with callback
-  if (jpeg.openRAM((uint8_t*)jpeg_data.data(), jpeg_data.size(), draw_callback) != 1) {
-    ESP_LOGE(TAG_IMAGE, "Failed to open JPEG with JPEGDEC");
+  return 1; // Continue decoding
+}
+
+// =====================================================
+// DÉCODEURS D'IMAGES - STACK SAFE IMPLEMENTATION
+// =====================================================
+
+bool SdImageComponent::decode_jpeg_real(const std::vector<uint8_t> &jpeg_data) {
+  ESP_LOGI(TAG_IMAGE, "Using JPEGDEC library for real JPEG decoding (stack-safe)");
+  
+#ifdef USE_JPEGDEC
+  // Allocate decoder on heap to avoid stack issues
+  JPEGDEC *jpeg = new(std::nothrow) JPEGDEC();
+  if (!jpeg) {
+    ESP_LOGE(TAG_IMAGE, "Failed to allocate JPEG decoder");
     return false;
   }
   
-  // Get dimensions (utilise seulement les méthodes disponibles)
-  this->width_ = jpeg.getWidth();
-  this->height_ = jpeg.getHeight();
+  // Reset error state
+  this->jpeg_decode_error_ = false;
+  
+  // Create a simple C-style callback function that calls our method
+  auto draw_callback = [](JPEGDRAW *pDraw) -> int {
+    SdImageComponent* component = static_cast<SdImageComponent*>(pDraw->pUser);
+    if (component) {
+      return component->jpeg_draw_callback(pDraw);
+    }
+    return 0;
+  };
+  
+  // Open JPEG with our component as user data
+  if (jpeg->openRAM((uint8_t*)jpeg_data.data(), jpeg_data.size(), draw_callback) != 1) {
+    ESP_LOGE(TAG_IMAGE, "Failed to open JPEG with JPEGDEC");
+    delete jpeg;
+    return false;
+  }
+  
+  // Set user data to this component
+  jpeg->setUserPointer(this);
+  
+  // Get dimensions
+  this->width_ = jpeg->getWidth();
+  this->height_ = jpeg->getHeight();
   
   ESP_LOGI(TAG_IMAGE, "JPEG dimensions: %dx%d", this->width_, this->height_);
-  // Supprimé les appels aux méthodes inexistantes getMCUWidth/getMCUHeight
   
   // Validate dimensions
   if (this->width_ <= 0 || this->height_ <= 0 || 
       this->width_ > 2048 || this->height_ > 2048) {
     ESP_LOGE(TAG_IMAGE, "Invalid JPEG dimensions: %dx%d", this->width_, this->height_);
-    jpeg.close();
+    jpeg->close();
+    delete jpeg;
     return false;
   }
   
-  // Allocate output buffer
+  // Allocate output buffer with error checking
   size_t output_size = this->calculate_output_size();
-  this->image_data_.resize(output_size);
+  
+  // Check if we have enough memory
+  if (output_size > 2 * 1024 * 1024) { // 2MB limit
+    ESP_LOGE(TAG_IMAGE, "Image too large: %zu bytes (max: 2MB)", output_size);
+    jpeg->close();
+    delete jpeg;
+    return false;
+  }
+  
+  try {
+    this->image_data_.clear();
+    this->image_data_.reserve(output_size);
+    this->image_data_.resize(output_size, 0); // Initialize with zeros
+  } catch (const std::exception& e) {
+    ESP_LOGE(TAG_IMAGE, "Failed to allocate image buffer: %zu bytes", output_size);
+    jpeg->close();
+    delete jpeg;
+    return false;
+  }
+  
   ESP_LOGI(TAG_IMAGE, "Allocated %zu bytes for decoded image", output_size);
   
-  // Configure static variables for callback
-  target_buffer = &this->image_data_;
-  target_width = this->width_;
-  target_height = this->height_;
-  target_component = this;
+  // Configure callback state variables
+  this->jpeg_decode_buffer_ = &this->image_data_;
+  this->jpeg_decode_width_ = this->width_;
+  this->jpeg_decode_height_ = this->height_;
   
-  ESP_LOGI(TAG_IMAGE, "Decoding JPEG with callback...");
+  ESP_LOGI(TAG_IMAGE, "Starting JPEG decoding with callback...");
   
-  // Decode the image (callback will be called automatically)
-  if (jpeg.decode(0, 0, 0) != 1) {
-    ESP_LOGE(TAG_IMAGE, "Failed to decode JPEG");
-    jpeg.close();
-    target_buffer = nullptr;
-    target_component = nullptr;
+  // Decode the image (callback will be called for each MCU)
+  int decode_result = jpeg->decode(0, 0, 0);
+  
+  // Clean up
+  jpeg->close();
+  delete jpeg;
+  
+  // Reset callback state
+  this->jpeg_decode_buffer_ = nullptr;
+  this->jpeg_decode_width_ = 0;
+  this->jpeg_decode_height_ = 0;
+  
+  if (decode_result != 1 || this->jpeg_decode_error_) {
+    ESP_LOGE(TAG_IMAGE, "Failed to decode JPEG (result: %d, error: %s)", 
+             decode_result, this->jpeg_decode_error_ ? "true" : "false");
     return false;
   }
   
-  jpeg.close();
-  target_buffer = nullptr;
-  target_component = nullptr;
-  
-  ESP_LOGI(TAG_IMAGE, "JPEG decoding complete");
+  ESP_LOGI(TAG_IMAGE, "JPEG decoding completed successfully");
   return true;
   
 #else
@@ -481,6 +580,29 @@ bool SdImageComponent::decode_png_real(const std::vector<uint8_t> &png_data) {
 #endif
 }
 
+// =====================================================
+// MAIN DECODE FUNCTIONS
+// =====================================================
+
+bool SdImageComponent::decode_jpeg(const std::vector<uint8_t> &jpeg_data) {
+#ifdef USE_JPEGDEC
+  return this->decode_jpeg_real(jpeg_data);
+#else
+  return this->decode_jpeg_fallback(jpeg_data);
+#endif
+}
+
+bool SdImageComponent::decode_png(const std::vector<uint8_t> &png_data) {
+  // On utilise le vrai décodeur si dispo, sinon le fallback
+#ifdef USE_PNGDEC
+  return this->decode_png_real(png_data);
+#else
+  return this->decode_png_fallback(png_data);
+#endif
+}
+
+// =====================================================
+// CONVERSION METHODS
 // =====================================================
 
 void SdImageComponent::convert_rgb888_to_target(const uint8_t *rgb_data, size_t pixel_count) {
@@ -535,6 +657,7 @@ bool SdImageComponent::decode_jpeg_fallback(const std::vector<uint8_t> &jpeg_dat
   
   // Calculate output size and allocate
   size_t output_size = this->calculate_output_size();
+  this->image_data_.clear();
   this->image_data_.resize(output_size);
   
   // Generate test pattern
@@ -568,6 +691,7 @@ bool SdImageComponent::decode_png_fallback(const std::vector<uint8_t> &png_data)
   
   // Calculate output size and allocate
   size_t output_size = this->calculate_output_size();
+  this->image_data_.clear();
   this->image_data_.resize(output_size);
   
   // Generate test pattern
@@ -730,6 +854,7 @@ bool SdImageComponent::load_image() {
 void SdImageComponent::unload_image() {
   ESP_LOGI(TAG_IMAGE, "🗑️ Unloading image data");
   this->image_data_.clear();
+  this->image_data_.shrink_to_fit(); // Free memory
   this->is_loaded_ = false;
 }
 
@@ -838,23 +963,6 @@ bool SdImageComponent::validate_image_data() const {
   
   size_t expected_size = this->calculate_output_size();
   return this->image_data_.size() == expected_size;
-}
-bool SdImageComponent::decode_jpeg(const std::vector<uint8_t> &jpeg_data) {
-#ifdef USE_JPEGDEC
-  return this->decode_jpeg_real(jpeg_data);
-#else
-  return this->decode_jpeg_fallback(jpeg_data);
-#endif
-}
-
-
-bool SdImageComponent::decode_png(const std::vector<uint8_t> &png_data) {
-  // On utilise le vrai décodeur si dispo, sinon le fallback
-#ifdef USE_PNGDEC
-  return this->decode_png_real(png_data);
-#else
-  return this->decode_png_fallback(png_data);
-#endif
 }
 
 }  // namespace storage
