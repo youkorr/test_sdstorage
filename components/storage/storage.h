@@ -88,7 +88,7 @@ class StorageComponent : public Component {
 class SdImageComponent : public Component, public image::Image {
  public:
   // Constructor following ESPHome pattern with proper Image initialization
-  SdImageComponent() : image::Image(nullptr, 0, 0, image::IMAGE_TYPE_RGB565) {}
+  SdImageComponent() : image::Image(nullptr, 0, 0, image::IMAGE_TYPE_RGB565, image::TRANSPARENCY_OPAQUE) {}
 
   // Component lifecycle
   void setup() override;
@@ -106,20 +106,14 @@ class SdImageComponent : public Component, public image::Image {
   void set_format(ImageFormat format) { this->format_ = format; }
   void set_auto_load(bool auto_load) { this->auto_load_ = auto_load; }
   
-  // Image interface implementation - correct override signatures
+  // Compatibility methods for YAML configuration
+  void set_output_format_string(const std::string &format);
+  void set_byte_order_string(const std::string &byte_order);
+  
+  // Image interface implementation - NO override needed
   void draw(int x, int y, display::Display *display, Color color_on, Color color_off) override;
   int get_width() const override;
   int get_height() const override;
-  image::ImageType get_type() const override;
-  
-  // Image data access - correct override signature
-  const uint8_t *get_data_start() const override { 
-    return this->image_buffer_.empty() ? nullptr : this->image_buffer_.data(); 
-  }
-  
-  size_t get_data_length() const { 
-    return this->image_buffer_.size(); 
-  }
   
   // Loading/unloading
   bool load_image();
@@ -233,6 +227,7 @@ class SdImageUnloadAction : public Action<Ts...> {
 
 }  // namespace storage
 }  // namespace esphome
+
 
 
 
