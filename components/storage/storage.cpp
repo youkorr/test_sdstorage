@@ -443,7 +443,11 @@ bool SdImageComponent::decode_jpeg_image(const std::vector<uint8_t> &jpeg_data) 
     return false;
   }
   
-  // Open JPEG data
+  // CRITIQUE: Configuration du décodeur pour LVGL
+  // Forcer le format RGB565 pour LVGL
+  this->format_ = ImageFormat::RGB565;
+  
+  // Open JPEG data avec callback pour traitement pixel par pixel
   int result = this->jpeg_decoder_->openRAM((uint8_t*)jpeg_data.data(), jpeg_data.size(), 
                                            SdImageComponent::jpeg_decode_callback);
   if (result != 1) {
@@ -478,7 +482,7 @@ bool SdImageComponent::decode_jpeg_image(const std::vector<uint8_t> &jpeg_data) 
     ESP_LOGI(TAG_IMAGE, "Resizing to: %dx%d", this->image_width_, this->image_height_);
   }
   
-  // Allocate buffer
+  // Allocate buffer - CRITIQUE: Forcer RGB565 pour LVGL
   if (!this->allocate_image_buffer()) {
     this->jpeg_decoder_->close();
     delete this->jpeg_decoder_;
@@ -487,10 +491,14 @@ bool SdImageComponent::decode_jpeg_image(const std::vector<uint8_t> &jpeg_data) 
     return false;
   }
   
-  ESP_LOGI(TAG_IMAGE, "Starting JPEG decode...");
+  // CRITIQUE: Initialiser le buffer à zéro pour éviter les artefacts
+  std::fill(this->image_buffer_.begin(), this->image_buffer_.end(), 0);
   
-  // Decode image
-  result = this->jpeg_decoder_->decode(0, 0, 0);
+  ESP_LOGI(TAG_IMAGE, "Starting JPEG decode with RGB565 format for LVGL...");
+  
+  // CRITIQUE: Décoder avec des paramètres optimisés pour LVGL
+  // Les paramètres 0,0,0 signifient: pas de scaling, format auto, pas de flags spéciaux
+  result = this->jpeg_decoder_->decode(0, 0, JPEG_SCALE_FULL | JPEG_ORDER_RGB);
   
   // Cleanup
   this->jpeg_decoder_->close();
@@ -503,7 +511,23 @@ bool SdImageComponent::decode_jpeg_image(const std::vector<uint8_t> &jpeg_data) 
     return false;
   }
   
-  ESP_LOGI(TAG_IMAGE, "JPEG decoded successfully");
+  ESP_LOGI(TAG_IMAGE, "JPEG decoded successfully to RGB565 format");
+  
+  // CRITIQUE: Vérifier l'intégrité du buffer après décodage
+  if (this->image_buffer_.empty()) {
+    ESP_LOGE(TAG_IMAGE, "Image buffer is empty after decoding");
+    return false;
+  }
+  
+  // Log des premiers pixels pour debug
+  if (this->image_buffer_.size() >= 8) {
+    ESP_LOGD(TAG_IMAGE, "First 4 RGB565 pixels: %04X %04X %04X %04X",
+             (this->image_buffer_[1] << 8) | this->image_buffer_[0],
+             (this->image_buffer_[3] << 8) | this->image_buffer_[2],
+             (this->image_buffer_[5] << 8) | this->image_buffer_[4],
+             (this->image_buffer_[7] << 8) | this->image_buffer_[6]);
+  }
+  
   return true;
   
 #else
@@ -514,30 +538,70 @@ bool SdImageComponent::decode_jpeg_image(const std::vector<uint8_t> &jpeg_data) 
 
 #ifdef USE_JPEGDEC
 int SdImageComponent::jpeg_decode_callback(JPEGDRAW *draw) {
-  if (!current_image_component || !draw) {
+  if (!current_image_component || !draw || !draw->pPixels) {
     ESP_LOGE(TAG_IMAGE, "Invalid callback state");
     return 0;
   }
   
-  // Process each pixel in the draw area safely
-  for (int y = 0; y < draw->iHeight; y++) {
-    for (int x = 0; x < draw->iWidth; x++) {
-      int pixel_x = draw->x + x;
-      int pixel_y = draw->y + y;
+  // CRITIQUE: Traitement optimisé pour LVGL avec gestion correcte des lignes
+  ESP_LOGD(TAG_IMAGE, "Decoding block: x=%d, y=%d, w=%d, h=%d", 
+           draw->x, draw->y, draw->iWidth, draw->iHeight);
+  
+  // Traiter chaque ligne de pixels dans le bloc
+  for (int line_y = 0; line_y < draw->iHeight; line_y++) {
+    int pixel_y = draw->y + line_y;
+    
+    // Vérifier les limites Y
+    if (pixel_y < 0 || pixel_y >= current_image_component->image_height_) {
+      continue;
+    }
+    
+    // Traiter chaque pixel de la ligne
+    for (int line_x = 0; line_x < draw->iWidth; line_x++) {
+      int pixel_x = draw->x + line_x;
       
-      // Bounds check
-      if (pixel_x < 0 || pixel_y < 0) continue;
+      // Vérifier les limites X
+      if (pixel_x < 0 || pixel_x >= current_image_component->image_width_) {
+        continue;
+      }
       
-      // Get RGB values from decode buffer
-      int offset = (y * draw->iWidth + x) * 3;
-      if (offset + 2 >= draw->iWidth * draw->iHeight * 3) continue;
+      // CRITIQUE: Calcul correct de l'offset dans le buffer de décodage
+      // JPEGDEC fournit les pixels en format RGB888 (24-bit)
+      int src_offset = (line_y * draw->iWidth + line_x) * 3;
       
-      uint8_t r = draw->pPixels[offset];
-      uint8_t g = draw->pPixels[offset + 1];
-      uint8_t b = draw->pPixels[offset + 2];
+      // Vérification des limites du buffer source
+      if (src_offset + 2 >= draw->iWidth * draw->iHeight * 3) {
+        ESP_LOGW(TAG_IMAGE, "Source buffer overflow at %d (max %d)", 
+                 src_offset, draw->iWidth * draw->iHeight * 3);
+        continue;
+      }
       
-      // Set pixel in our buffer
-      current_image_component->jpeg_decode_pixel(pixel_x, pixel_y, r, g, b);
+      // Extraire les composantes RGB
+      uint8_t r = draw->pPixels[src_offset];
+      uint8_t g = draw->pPixels[src_offset + 1]; 
+      uint8_t b = draw->pPixels[src_offset + 2];
+      
+      // CRITIQUE: Conversion directe en RGB565 pour éviter les pertes
+      uint16_t rgb565 = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
+      
+      // Calculer l'offset dans notre buffer de destination
+      size_t dst_offset = (pixel_y * current_image_component->image_width_ + pixel_x) * 2;
+      
+      // Vérifier les limites du buffer de destination
+      if (dst_offset + 1 < current_image_component->image_buffer_.size()) {
+        // Stocker en little-endian (compatible LVGL)
+        current_image_component->image_buffer_[dst_offset] = rgb565 & 0xFF;
+        current_image_component->image_buffer_[dst_offset + 1] = (rgb565 >> 8) & 0xFF;
+      } else {
+        ESP_LOGW(TAG_IMAGE, "Destination buffer overflow at %zu (max %zu)", 
+                 dst_offset, current_image_component->image_buffer_.size());
+      }
+    }
+    
+    // Yield périodique pour éviter le watchdog
+    if ((pixel_y % 16) == 0) {
+      App.feed_wdt();
+      yield();
     }
   }
   
