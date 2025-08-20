@@ -466,114 +466,22 @@ bool SdImageComponent::decode_jpeg_real(const std::vector<uint8_t> &jpeg_data) {
 }
 
 // =====================================================
-// DÉCODEUR PNG (fallback seulement pour l'instant)
+// DÉCODEUR PNG (fallback seulement)
 // =====================================================
 
 bool SdImageComponent::decode_png_real(const std::vector<uint8_t> &png_data) {
-  ESP_LOGI(TAG_IMAGE, "🔧 Using PNGDEC library for real PNG decoding");
+  ESP_LOGI(TAG_IMAGE, "🔧 PNG decoding requested");
   
 #ifdef USE_PNGDEC
-  PNG png;
-  
-  // Callback for receiving decoded pixels
-  static std::vector<uint8_t> *target_buffer = nullptr;
-  static int target_width = 0;
-  static int target_height = 0;
-  static OutputImageFormat target_format;
-  static ByteOrder target_byte_order;
-  static SdImageComponent* target_component = nullptr;
-  
-  // Lambda function for decoding callback
-  auto draw_callback = [](PNGDRAW *pDraw) -> void {
-    if (!target_buffer || !pDraw || !target_component) return;
-    
-    // Copy pixels to our buffer
-    int y_start = pDraw->y;
-    int x_start = pDraw->x;
-    int width = pDraw->iWidth;
-    int height = pDraw->iHeight;
-    
-    for (int y = 0; y < height; y++) {
-      for (int x = 0; x < width; x++) {
-        int src_offset = (y * width + x) * 4; // RGBA
-        int dst_x = x_start + x;
-        int dst_y = y_start + y;
-        
-        if (dst_x < target_width && dst_y < target_height) {
-          uint8_t r = pDraw->pPixels[src_offset + 0];
-          uint8_t g = pDraw->pPixels[src_offset + 1];
-          uint8_t b = pDraw->pPixels[src_offset + 2];
-          uint8_t a = pDraw->pPixels[src_offset + 3];
-          
-          size_t offset = target_component->get_pixel_offset(dst_x, dst_y);
-          target_component->set_pixel_at_offset(offset, r, g, b, a);
-        }
-      }
-    }
-  };
-  
-  // Open the PNG with callback
-  if (png.openRAM((uint8_t*)png_data.data(), png_data.size(), draw_callback) != PNG_SUCCESS) {
-    ESP_LOGE(TAG_IMAGE, "❌ Failed to open PNG with PNGDEC");
-    return false;
-  }
-  
-  // Get dimensions
-  this->width_ = png.getWidth();
-  this->height_ = png.getHeight();
-  
-  ESP_LOGI(TAG_IMAGE, "📏 PNG dimensions: %dx%d", this->width_, this->height_);
-  ESP_LOGI(TAG_IMAGE, "📏 PNG bit depth: %d", png.getBpp());
-  ESP_LOGI(TAG_IMAGE, "📏 PNG has alpha: %s", png.hasAlpha() ? "YES" : "NO");
-  
-  // Validate dimensions
-  if (this->width_ <= 0 || this->height_ <= 0 || 
-      this->width_ > 2048 || this->height_ > 2048) {
-    ESP_LOGE(TAG_IMAGE, "❌ Invalid PNG dimensions: %dx%d", this->width_, this->height_);
-    png.close();
-    return false;
-  }
-  
-  // Allocate output buffer
-  size_t output_size = this->calculate_output_size();
-  this->image_data_.resize(output_size);
-  ESP_LOGI(TAG_IMAGE, "💾 Allocated %zu bytes for decoded image", output_size);
-  
-  // Configure static variables for callback
-  target_buffer = &this->image_data_;
-  target_width = this->width_;
-  target_height = this->height_;
-  target_format = this->output_format_;
-  target_byte_order = this->byte_order_;
-  target_component = this;
-  
-  ESP_LOGI(TAG_IMAGE, "🔄 Decoding PNG with callback...");
-  
-  // Decode the image (callback will be called automatically)
-  if (png.decode(nullptr, 0) != PNG_SUCCESS) {
-    ESP_LOGE(TAG_IMAGE, "❌ Failed to decode PNG");
-    png.close();
-    target_buffer = nullptr;
-    target_component = nullptr;
-    return false;
-  }
-  
-  png.close();
-  target_buffer = nullptr;
-  target_component = nullptr;
-  
-  ESP_LOGI(TAG_IMAGE, "✅ PNG decoding complete");
-  return true;
-  
+  // Code PNG ici si la bibliothèque est disponible
+  ESP_LOGW(TAG_IMAGE, "⚠️ PNGDEC available but not fully implemented, using fallback");
+  return this->decode_png_fallback(png_data);
 #else
   ESP_LOGW(TAG_IMAGE, "⚠️ PNGDEC library not available, using fallback");
   return this->decode_png_fallback(png_data);
 #endif
 }
 
-
-// =====================================================
-// CONVERSION DE FORMATS
 // =====================================================
 
 void SdImageComponent::convert_rgb888_to_target(const uint8_t *rgb_data, size_t pixel_count) {
