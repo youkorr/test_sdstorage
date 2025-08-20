@@ -543,11 +543,20 @@ int SdImageComponent::jpeg_decode_callback(JPEGDRAW *draw) {
     return 0;
   }
   
-  // CRITIQUE: Traitement optimisé pour LVGL avec gestion correcte des lignes
+  // CORRECTION CRITIQUE : Le problème était ici - mauvaise gestion des dimensions du bloc
   ESP_LOGD(TAG_IMAGE, "Decoding block: x=%d, y=%d, w=%d, h=%d", 
            draw->x, draw->y, draw->iWidth, draw->iHeight);
   
-  // Traiter chaque ligne de pixels dans le bloc
+  // CORRECTION 1: Vérifier que le composant courant est bien initialisé
+  if (current_image_component->image_buffer_.empty()) {
+    ESP_LOGE(TAG_IMAGE, "Image buffer not allocated");
+    return 0;
+  }
+  
+  // CORRECTION 2: Traitement correct des pixels RGB565 depuis JPEGDEC
+  // JPEGDEC peut retourner différents formats selon la configuration
+  bool is_rgb565_input = (draw->iBpp == 16);
+  
   for (int line_y = 0; line_y < draw->iHeight; line_y++) {
     int pixel_y = draw->y + line_y;
     
@@ -556,7 +565,6 @@ int SdImageComponent::jpeg_decode_callback(JPEGDRAW *draw) {
       continue;
     }
     
-    // Traiter chaque pixel de la ligne
     for (int line_x = 0; line_x < draw->iWidth; line_x++) {
       int pixel_x = draw->x + line_x;
       
@@ -565,41 +573,44 @@ int SdImageComponent::jpeg_decode_callback(JPEGDRAW *draw) {
         continue;
       }
       
-      // CRITIQUE: Calcul correct de l'offset dans le buffer de décodage
-      // JPEGDEC fournit les pixels en format RGB888 (24-bit)
-      int src_offset = (line_y * draw->iWidth + line_x) * 3;
+      uint16_t rgb565_pixel;
       
-      // Vérification des limites du buffer source
-      if (src_offset + 2 >= draw->iWidth * draw->iHeight * 3) {
-        ESP_LOGW(TAG_IMAGE, "Source buffer overflow at %d (max %d)", 
-                 src_offset, draw->iWidth * draw->iHeight * 3);
-        continue;
+      if (is_rgb565_input) {
+        // CORRECTION 3: Si JPEGDEC fournit déjà du RGB565
+        int src_offset = (line_y * draw->iWidth + line_x) * 2;
+        if (src_offset + 1 < draw->iWidth * draw->iHeight * 2) {
+          // Lire le pixel RGB565 (attention à l'endianness)
+          rgb565_pixel = ((uint16_t*)draw->pPixels)[line_y * draw->iWidth + line_x];
+        } else {
+          continue;
+        }
+      } else {
+        // CORRECTION 4: Si JPEGDEC fournit du RGB888, convertir
+        int src_offset = (line_y * draw->iWidth + line_x) * 3;
+        if (src_offset + 2 >= draw->iWidth * draw->iHeight * 3) {
+          continue;
+        }
+        
+        uint8_t r = draw->pPixels[src_offset];
+        uint8_t g = draw->pPixels[src_offset + 1];
+        uint8_t b = draw->pPixels[src_offset + 2];
+        
+        // Conversion RGB888 -> RGB565
+        rgb565_pixel = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
       }
       
-      // Extraire les composantes RGB
-      uint8_t r = draw->pPixels[src_offset];
-      uint8_t g = draw->pPixels[src_offset + 1]; 
-      uint8_t b = draw->pPixels[src_offset + 2];
-      
-      // CRITIQUE: Conversion directe en RGB565 pour éviter les pertes
-      uint16_t rgb565 = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
-      
-      // Calculer l'offset dans notre buffer de destination
+      // CORRECTION 5: Calcul correct de l'offset de destination
       size_t dst_offset = (pixel_y * current_image_component->image_width_ + pixel_x) * 2;
       
-      // Vérifier les limites du buffer de destination
       if (dst_offset + 1 < current_image_component->image_buffer_.size()) {
-        // Stocker en little-endian (compatible LVGL)
-        current_image_component->image_buffer_[dst_offset] = rgb565 & 0xFF;
-        current_image_component->image_buffer_[dst_offset + 1] = (rgb565 >> 8) & 0xFF;
-      } else {
-        ESP_LOGW(TAG_IMAGE, "Destination buffer overflow at %zu (max %zu)", 
-                 dst_offset, current_image_component->image_buffer_.size());
+        // CORRECTION 6: Stockage en little-endian pour LVGL
+        current_image_component->image_buffer_[dst_offset] = rgb565_pixel & 0xFF;
+        current_image_component->image_buffer_[dst_offset + 1] = (rgb565_pixel >> 8) & 0xFF;
       }
     }
     
     // Yield périodique pour éviter le watchdog
-    if ((pixel_y % 16) == 0) {
+    if ((draw->y + line_y) % 8 == 0) {
       App.feed_wdt();
       yield();
     }
