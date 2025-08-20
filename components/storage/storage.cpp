@@ -176,7 +176,7 @@ void SdImageComponent::set_byte_order_string(const std::string &byte_order) {
   ESP_LOGD(TAG_IMAGE, "Byte order set to: %s", byte_order.c_str());
 }
 
-// CRITIQUE: Implémentation de la méthode draw() selon le code source ESPHome
+// Implementation de la méthode draw() selon le code source ESPHome
 void SdImageComponent::draw(int x, int y, display::Display *display, Color color_on, Color color_off) {
   if (!this->image_loaded_ || this->image_buffer_.empty()) {
     ESP_LOGW(TAG_IMAGE, "Cannot draw: image not loaded");
@@ -187,7 +187,7 @@ void SdImageComponent::draw(int x, int y, display::Display *display, Color color
            this->get_current_width(), this->get_current_height(), x, y,
            this->width_, this->height_, this->data_start_);
   
-  // CRITIQUE: Si les données de base sont correctes, utiliser la méthode optimisée d'ESPHome
+  // Si les données de base sont correctes, utiliser la méthode optimisée d'ESPHome
   if (this->data_start_ && this->width_ > 0 && this->height_ > 0) {
     ESP_LOGD(TAG_IMAGE, "Using ESPHome base image draw method");
     // Appeler la méthode de base qui gère le clipping et l'optimisation
@@ -254,7 +254,7 @@ bool SdImageComponent::load_image_from_path(const std::string &path) {
   this->file_path_ = path;
   this->image_loaded_ = true;
   
-  // CRITIQUE: Finaliser le chargement en mettant à jour les propriétés de base
+  // Finaliser le chargement en mettant à jour les propriétés de base
   this->finalize_image_load();
   
   ESP_LOGI(TAG_IMAGE, "Image loaded successfully: %dx%d, %zu bytes", 
@@ -270,7 +270,7 @@ void SdImageComponent::unload_image() {
   this->image_width_ = 0;
   this->image_height_ = 0;
   
-  // CRITIQUE: Réinitialiser aussi les propriétés de la classe de base
+  // Réinitialiser aussi les propriétés de la classe de base
   this->width_ = 0;
   this->height_ = 0;
   this->data_start_ = nullptr;
@@ -283,7 +283,7 @@ bool SdImageComponent::reload_image() {
   return this->load_image_from_path(path);
 }
 
-// CRITIQUE: Implémentation de finalize_image_load()
+// Implémentation de finalize_image_load()
 void SdImageComponent::finalize_image_load() {
   if (this->image_loaded_) {
     this->update_base_image_properties();
@@ -292,7 +292,7 @@ void SdImageComponent::finalize_image_load() {
   }
 }
 
-// CRITIQUE: Mise à jour des propriétés de la classe de base selon le code source ESPHome
+// Mise à jour des propriétés de la classe de base selon le code source ESPHome
 void SdImageComponent::update_base_image_properties() {
   // Mettre à jour les membres de la classe de base
   this->width_ = this->get_current_width();
@@ -302,7 +302,7 @@ void SdImageComponent::update_base_image_properties() {
   if (!this->image_buffer_.empty()) {
     this->data_start_ = this->image_buffer_.data();
     
-    // CRITIQUE: Calculer bpp selon le code source ESPHome
+    // Calculer bpp selon le code source ESPHome
     switch (this->type_) {
       case image::IMAGE_TYPE_BINARY:
         this->bpp_ = 1;
@@ -442,7 +442,7 @@ bool SdImageComponent::decode_jpeg_image(const std::vector<uint8_t> &jpeg_data) 
     return false;
   }
   
-  // CORRECTION 8: Configuration correcte du décodeur JPEGDEC
+  // Configuration correcte du décodeur JPEGDEC
   // Forcer le format RGB565 directement dans JPEGDEC
   this->format_ = ImageFormat::RGB565;
   
@@ -474,23 +474,11 @@ bool SdImageComponent::decode_jpeg_image(const std::vector<uint8_t> &jpeg_data) 
     return false;
   }
   
-  // CORRECTION 9: Gestion correcte du redimensionnement
+  // Gestion correcte du redimensionnement
   if (this->resize_width_ > 0 && this->resize_height_ > 0) {
     this->image_width_ = this->resize_width_;
     this->image_height_ = this->resize_height_;
     ESP_LOGI(TAG_IMAGE, "Will resize to: %dx%d", this->image_width_, this->image_height_);
-    
-    // CORRECTION 10: Utiliser les fonctions de scaling de JPEGDEC
-    int scale = 1;
-    if (orig_width > this->resize_width_ * 2 && orig_height > this->resize_height_ * 2) {
-      scale = 2;
-    } else if (orig_width > this->resize_width_ * 4 && orig_height > this->resize_height_ * 4) {
-      scale = 4;
-    }
-    
-    if (scale > 1) {
-      ESP_LOGI(TAG_IMAGE, "Using JPEG hardware scaling 1/%d", scale);
-    }
   } else {
     this->image_width_ = orig_width;
     this->image_height_ = orig_height;
@@ -505,18 +493,14 @@ bool SdImageComponent::decode_jpeg_image(const std::vector<uint8_t> &jpeg_data) 
     return false;
   }
   
-  // CORRECTION 11: Initialisation propre du buffer
+  // Initialisation propre du buffer
   std::fill(this->image_buffer_.begin(), this->image_buffer_.end(), 0);
   
   ESP_LOGI(TAG_IMAGE, "Starting JPEG decode to RGB565...");
   
-  // CORRECTION 12: Paramètres de décodage optimisés
-  // decode(x, y, flags) où flags peut inclure JPEG_SCALE_HALF, etc.
+  // Paramètres de décodage optimisés
+  // decode(x, y, flags)
   int decode_flags = 0;
-  if (this->resize_width_ > 0 && this->resize_height_ > 0) {
-    // Laisser JPEGDEC gérer le scaling si possible
-    decode_flags = JPEG_SCALE_HALF; // ou autres flags selon le besoin
-  }
   
   result = this->jpeg_decoder_->decode(0, 0, decode_flags);
   
@@ -539,7 +523,7 @@ bool SdImageComponent::decode_jpeg_image(const std::vector<uint8_t> &jpeg_data) 
     return false;
   }
   
-  // CORRECTION 13: Log amélioré pour debug
+  // Log amélioré pour debug
   if (this->image_buffer_.size() >= 8) {
     uint16_t pixel1 = (this->image_buffer_[1] << 8) | this->image_buffer_[0];
     uint16_t pixel2 = (this->image_buffer_[3] << 8) | this->image_buffer_[2];
@@ -558,6 +542,10 @@ bool SdImageComponent::decode_jpeg_image(const std::vector<uint8_t> &jpeg_data) 
   
   return true;
 }
+
+// =====================================================
+// JPEG Decoder Callback Implementation
+// =====================================================
 
 int SdImageComponent::jpeg_decode_callback(JPEGDRAW *pDraw) {
   // Get the current component instance
@@ -625,6 +613,7 @@ int SdImageComponent::jpeg_decode_callback(JPEGDRAW *pDraw) {
   
   return 1; // Continue decoding
 }
+
 bool SdImageComponent::jpeg_decode_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b) {
   // Apply resize scaling if needed
   if (this->resize_width_ > 0 && this->resize_height_ > 0) {
@@ -642,7 +631,6 @@ bool SdImageComponent::jpeg_decode_pixel(int x, int y, uint8_t r, uint8_t g, uin
   this->set_pixel(x, y, r, g, b);
   return true;
 }
-
 
 // =====================================================
 // Helper Methods
