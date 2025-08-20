@@ -195,7 +195,7 @@ void SdImageComponent::draw(int x, int y, display::Display *display, Color color
         }
         
         // Yield pour éviter le watchdog timeout
-        yield();
+        delay(0);
       }
     }
   } else {
