@@ -30,7 +30,8 @@
 #endif
 
 #ifdef USE_PNGDEC
-#include <PNGdec.h>
+#include "PNGdec.h"
+
 #endif
 
 namespace esphome {
