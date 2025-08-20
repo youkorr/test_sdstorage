@@ -12,9 +12,20 @@
 #include "esphome/components/display/display.h"
 #include "../sd_mmc_card/sd_mmc_card.h"
 
-// Décodeurs d'images
-#include <JPEGDEC.h>
+// Enable image decoder defines
+#define USE_JPEGDEC
+#define USE_PNGDEC
 
+// Image decoders
+#ifdef USE_JPEGDEC
+#include <JPEGDEC.h>
+#endif
+
+#ifdef USE_PNGDEC
+// You'll need to add a PNG library like libpng or PNGDEC
+// For now, we'll use a simple PNG decoder
+#include <PNGDEC.h>  // Add this library to your project
+#endif
 
 namespace esphome {
 namespace storage {
@@ -22,10 +33,10 @@ namespace storage {
 // Forward declarations
 class StorageComponent;
 
-// Utiliser l'enum ImageType de ESPHome
+// Use ESPHome's ImageType enum
 using ImageType = image::ImageType;
 
-// Énumérations correctement déclarées avec enum class
+// Properly declared enums with enum class
 enum class OutputImageFormat {
   rgb565,
   rgb888,
@@ -38,7 +49,7 @@ enum class ByteOrder {
 };
 
 // =====================================================
-// StorageComponent - Classe principale Storage
+// StorageComponent - Main Storage Class
 // =====================================================
 class StorageComponent : public Component {
  public:
@@ -54,7 +65,7 @@ class StorageComponent : public Component {
   void set_sd_component(sd_mmc_card::SdMmc *sd_component) { this->sd_component_ = sd_component; }
   void set_root_path(const std::string &root_path) { this->root_path_ = root_path; }
   
-  // Méthodes de fichier
+  // File methods
   bool file_exists_direct(const std::string &path);
   std::vector<uint8_t> read_file_direct(const std::string &path);
   bool write_file_direct(const std::string &path, const std::vector<uint8_t> &data);
@@ -72,14 +83,14 @@ class StorageComponent : public Component {
 };
 
 // =====================================================
-// SdImageComponent - Composant d'image SD avec vrais décodeurs
+// SdImageComponent - SD Image Component with Real Decoders
 // =====================================================
 class SdImageComponent : public Component, public image::Image {
  public:
-  // Constructeur proper pour image::Image base class
+  // Proper constructor for image::Image base class
   SdImageComponent() : image::Image(nullptr, 0, 0, image::IMAGE_TYPE_RGB565, image::TRANSPARENCY_OPAQUE) {}
 
-  // Méthodes Component
+  // Component methods
   void setup() override;
   void loop() override {}
   void dump_config() override;
@@ -91,11 +102,11 @@ class SdImageComponent : public Component, public image::Image {
   void set_byte_order(ByteOrder byte_order) { this->byte_order_ = byte_order; }
   void set_storage_component(StorageComponent *storage) { this->storage_component_ = storage; }
   
-  // String setter methods (appelées depuis Python)
+  // String setter methods (called from Python)
   void set_output_format_string(const std::string &format);
   void set_byte_order_string(const std::string &byte_order);
   
-  // Setters pour les dimensions
+  // Dimension setters
   void set_width(int width) { this->width_ = width; }
   void set_height(int height) { this->height_ = height; }
   void set_resize(int width, int height) { 
@@ -196,17 +207,13 @@ class SdImageComponent : public Component, public image::Image {
   bool decode_png(const std::vector<uint8_t> &png_data);
   bool load_raw_data(const std::vector<uint8_t> &raw_data);
   
-  // ===== VRAIS DÉCODEURS D'IMAGES =====
+  // ===== REAL IMAGE DECODERS =====
   bool decode_jpeg_real(const std::vector<uint8_t> &jpeg_data);
   bool decode_png_real(const std::vector<uint8_t> &png_data);
   
-  // ===== FALLBACK DÉCODEURS (patterns de test) =====
+  // ===== FALLBACK DECODERS (test patterns) =====
   bool decode_jpeg_fallback(const std::vector<uint8_t> &jpeg_data);
   bool decode_png_fallback(const std::vector<uint8_t> &png_data);
-  
-  // ===== CALLBACKS POUR JPEGDEC =====
-  static int jpeg_read_callback(JPEGFILE *pFile, uint8_t *pBuf, int32_t iLen);
-  static int jpeg_seek_callback(JPEGFILE *pFile, int32_t iPosition);
   
   // ===== DIMENSION EXTRACTION =====
   bool extract_jpeg_dimensions(const std::vector<uint8_t> &data, int &width, int &height) const;
@@ -220,7 +227,7 @@ class SdImageComponent : public Component, public image::Image {
   void convert_byte_order();
   size_t calculate_output_size() const;
   
-  // ===== CONVERSION DE FORMATS =====
+  // ===== FORMAT CONVERSION =====
   void convert_rgb888_to_target(const uint8_t *rgb_data, size_t pixel_count);
   void convert_rgba_to_target(const uint8_t *rgba_data, size_t pixel_count);
   
@@ -240,9 +247,13 @@ class SdImageComponent : public Component, public image::Image {
   bool is_supported_format(const std::string &extension) const;
   void list_directory_contents(const std::string &dir_path);
   
-  // ===== DONNÉES TEMPORAIRES POUR DÉCODEURS =====
+  // ===== TEMPORARY DATA FOR DECODERS =====
   std::vector<uint8_t> *jpeg_data_ptr_{nullptr};
   size_t jpeg_position_{0};
+  
+#ifdef USE_PNGDEC  
+  PNG png_decoder_;
+#endif
 };
 
 // =====================================================
@@ -254,7 +265,7 @@ class SdImageLoadAction : public Action<Ts...> {
   SdImageLoadAction() = default;
   explicit SdImageLoadAction(SdImageComponent *parent) : parent_(parent) {}
   
-  // Template value pour le chemin de fichier
+  // Template value for file path
   TEMPLATABLE_VALUE(std::string, file_path)
   
   void set_parent(SdImageComponent *parent) { this->parent_ = parent; }
@@ -265,7 +276,7 @@ class SdImageLoadAction : public Action<Ts...> {
       return;
     }
     
-    // Si un chemin de fichier est fourni dans l'action
+    // If a file path is provided in the action
     if (this->file_path_.has_value()) {
       std::string path = this->file_path_.value(x...);
       if (!path.empty()) {
@@ -277,7 +288,7 @@ class SdImageLoadAction : public Action<Ts...> {
       }
     }
     
-    // Sinon, utiliser le chemin configuré
+    // Otherwise, use the configured path
     ESP_LOGD("sd_image.load", "Loading image from configured path");
     if (!this->parent_->load_image()) {
       ESP_LOGE("sd_image.load", "Failed to load image from configured path");
