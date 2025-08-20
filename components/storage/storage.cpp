@@ -558,7 +558,7 @@ bool SdImageComponent::decode_jpeg_image(const std::vector<uint8_t> &jpeg_data) 
   
   return true;
 }
-#endif
+
 
 bool SdImageComponent::jpeg_decode_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b) {
   // Apply resize scaling if needed
