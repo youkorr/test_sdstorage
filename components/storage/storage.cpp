@@ -162,42 +162,93 @@ void SdImageComponent::set_byte_order_string(const std::string &byte_order) {
 }
 
 // Image interface implementation
+// Remplacer la méthode draw() dans storage.cpp
+
 void SdImageComponent::draw(int x, int y, display::Display *display, Color color_on, Color color_off) {
   if (!this->image_loaded_ || this->image_buffer_.empty()) {
     ESP_LOGW(TAG_IMAGE, "Cannot draw: image not loaded");
     return;
   }
   
-  // Use ESPHome's image drawing
-  for (int img_x = 0; img_x < this->image_width_; img_x++) {
-    for (int img_y = 0; img_y < this->image_height_; img_y++) {
-      size_t offset = (img_y * this->image_width_ + img_x) * this->get_pixel_size();
+  ESP_LOGD(TAG_IMAGE, "Drawing image %dx%d at position %d,%d", 
+           this->image_width_, this->image_height_, x, y);
+  
+  // Pour les grands écrans, utiliser une méthode plus efficace
+  if (this->image_width_ > 320 || this->image_height_ > 240) {
+    // Dessiner par chunks pour éviter les timeouts
+    const int CHUNK_HEIGHT = 32;
+    
+    for (int chunk_y = 0; chunk_y < this->image_height_; chunk_y += CHUNK_HEIGHT) {
+      int chunk_height = std::min(CHUNK_HEIGHT, this->image_height_ - chunk_y);
       
-      if (offset + this->get_pixel_size() <= this->image_buffer_.size()) {
-        Color pixel_color;
+      for (int chunk_x = 0; chunk_x < this->image_width_; chunk_x += 64) {
+        int chunk_width = std::min(64, this->image_width_ - chunk_x);
         
-        if (this->format_ == ImageFormat::RGB565) {
-          uint16_t rgb565 = this->image_buffer_[offset] | (this->image_buffer_[offset + 1] << 8);
-          uint8_t r = (rgb565 >> 11) << 3;
-          uint8_t g = ((rgb565 >> 5) & 0x3F) << 2;
-          uint8_t b = (rgb565 & 0x1F) << 3;
-          pixel_color = Color(r, g, b);
-        } else if (this->format_ == ImageFormat::RGB888) {
-          pixel_color = Color(this->image_buffer_[offset], 
-                            this->image_buffer_[offset + 1], 
-                            this->image_buffer_[offset + 2]);
-        } else if (this->format_ == ImageFormat::RGBA) {
-          pixel_color = Color(this->image_buffer_[offset], 
-                            this->image_buffer_[offset + 1], 
-                            this->image_buffer_[offset + 2], 
-                            this->image_buffer_[offset + 3]);
+        // Dessiner le chunk
+        for (int cy = 0; cy < chunk_height; cy++) {
+          for (int cx = 0; cx < chunk_width; cx++) {
+            int img_x = chunk_x + cx;
+            int img_y = chunk_y + cy;
+            
+            this->draw_pixel_at(display, x + img_x, y + img_y, img_x, img_y);
+          }
         }
         
-        display->draw_pixel_at(x + img_x, y + img_y, pixel_color);
+        // Yield pour éviter le watchdog timeout
+        yield();
       }
     }
+  } else {
+    // Méthode standard pour les petites images
+    for (int img_y = 0; img_y < this->image_height_; img_y++) {
+      for (int img_x = 0; img_x < this->image_width_; img_x++) {
+        this->draw_pixel_at(display, x + img_x, y + img_y, img_x, img_y);
+      }
+      
+      if (img_y % 16 == 0) yield(); // Yield périodique
+    }
   }
+  
+  ESP_LOGD(TAG_IMAGE, "Image drawing completed");
 }
+
+// Nouvelle méthode helper pour dessiner un pixel
+void SdImageComponent::draw_pixel_at(display::Display *display, int screen_x, int screen_y, int img_x, int img_y) {
+  size_t offset = (img_y * this->image_width_ + img_x) * this->get_pixel_size();
+  
+  if (offset + this->get_pixel_size() > this->image_buffer_.size()) {
+    return;
+  }
+  
+  Color pixel_color;
+  
+  switch (this->format_) {
+    case ImageFormat::RGB565: {
+      uint16_t rgb565 = this->image_buffer_[offset] | (this->image_buffer_[offset + 1] << 8);
+      uint8_t r = ((rgb565 >> 11) & 0x1F) << 3;
+      uint8_t g = ((rgb565 >> 5) & 0x3F) << 2;
+      uint8_t b = (rgb565 & 0x1F) << 3;
+      pixel_color = Color(r, g, b);
+      break;
+    }
+    case ImageFormat::RGB888:
+      pixel_color = Color(this->image_buffer_[offset], 
+                        this->image_buffer_[offset + 1], 
+                        this->image_buffer_[offset + 2]);
+      break;
+    case ImageFormat::RGBA:
+      pixel_color = Color(this->image_buffer_[offset], 
+                        this->image_buffer_[offset + 1], 
+                        this->image_buffer_[offset + 2], 
+                        this->image_buffer_[offset + 3]);
+      break;
+    default:
+      return;
+  }
+  
+  display->draw_pixel_at(screen_x, screen_y, pixel_color);
+}
+
 
 int SdImageComponent::get_width() const {
   return this->resize_width_ > 0 ? this->resize_width_ : this->image_width_;
