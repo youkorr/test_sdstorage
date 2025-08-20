@@ -180,6 +180,8 @@ class SdImageComponent : public Component, public image::Image {
   
   // Update image properties when loading
   void update_image_properties();
+
+  void draw_pixel_at(display::Display *display, int screen_x, int screen_y, int img_x, int img_y);
 };
 
 // =====================================================
