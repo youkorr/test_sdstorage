@@ -577,7 +577,7 @@ bool SdImageComponent::jpeg_decode_pixel(int x, int y, uint8_t r, uint8_t g, uin
   this->set_pixel(x, y, r, g, b);
   return true;
 }
-#endif
+
 
 // =====================================================
 // Helper Methods
