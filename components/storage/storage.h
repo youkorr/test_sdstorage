@@ -14,10 +14,8 @@
 
 // Image decoder configuration for ESP-IDF
 #ifdef ESP_IDF_VERSION
-  // Use JPEGDEC library which works with ESP-IDF
   #define USE_JPEGDEC
 #else
-  // Arduino framework
   #define USE_JPEGDEC
 #endif
 
@@ -33,10 +31,7 @@ namespace storage {
 class StorageComponent;
 class SdImageComponent;
 
-// Use ESPHome's ImageType enum directly
-using ImageType = image::ImageType;
-
-// Image format enums - avoid conflicts with system macros
+// Image format enums
 enum class ImageFormat {
   RGB565,
   RGB888,
@@ -83,12 +78,15 @@ class StorageComponent : public Component {
 };
 
 // =====================================================
-// SdImageComponent - ESPHome Pattern Implementation
+// SdImageComponent - Version corrigée pour ESPHome/LVGL
 // =====================================================
 class SdImageComponent : public Component, public image::Image {
  public:
-  // Constructor following ESPHome pattern with proper Image initialization
-  SdImageComponent() : image::Image(nullptr, 0, 0, image::IMAGE_TYPE_RGB565, image::TRANSPARENCY_OPAQUE) {}
+  // Constructeur CRITIQUE - doit initialiser la classe de base avec des données valides
+  SdImageComponent() : Component(), 
+                       image::Image(nullptr, 0, 0, image::IMAGE_TYPE_RGB565, image::TRANSPARENCY_OPAQUE) {
+    // Initialisation de base
+  }
 
   // Component lifecycle
   void setup() override;
@@ -110,16 +108,19 @@ class SdImageComponent : public Component, public image::Image {
   void set_output_format_string(const std::string &format);
   void set_byte_order_string(const std::string &byte_order);
   
-  // Image interface implementation - NO override needed
+  // CRITIQUE: Override des méthodes Image avec la signature exacte du code source ESPHome
   void draw(int x, int y, display::Display *display, Color color_on, Color color_off) override;
-  int get_width() const override;
-  int get_height() const override;
+  int get_width() const override { return this->get_current_width(); }
+  int get_height() const override { return this->get_current_height(); }
   
   // Loading/unloading
   bool load_image();
   bool load_image_from_path(const std::string &path);
   void unload_image();
   bool reload_image();
+  
+  // CRITIQUE: Méthode pour finaliser le chargement
+  void finalize_image_load();
   
   // Status
   bool is_loaded() const { return this->image_loaded_; }
@@ -136,13 +137,13 @@ class SdImageComponent : public Component, public image::Image {
   bool image_loaded_{false};
   bool auto_load_{true};
   
-  // Image properties
+  // Image properties - locales
   int image_width_{0};
   int image_height_{0};
   int resize_width_{0};
   int resize_height_{0};
   ImageFormat format_{ImageFormat::RGB565};
-  
+
  private:
   // File type detection
   enum class FileType {
@@ -157,7 +158,7 @@ class SdImageComponent : public Component, public image::Image {
   bool decode_image(const std::vector<uint8_t> &data);
   bool decode_jpeg_image(const std::vector<uint8_t> &jpeg_data);
   
-  // JPEG decoder callbacks (ESPHome pattern)
+  // JPEG decoder callbacks
 #ifdef USE_JPEGDEC
   static int jpeg_decode_callback(JPEGDRAW *draw);
   JPEGDEC *jpeg_decoder_{nullptr};
@@ -170,18 +171,23 @@ class SdImageComponent : public Component, public image::Image {
   size_t get_pixel_size() const;
   size_t get_buffer_size() const;
   
+  // CRITIQUE: Mise à jour des propriétés de la classe de base selon le code source ESPHome
+  void update_base_image_properties();
+  
+  int get_current_width() const;
+  int get_current_height() const;
+  image::ImageType get_esphome_image_type() const;
+  
+  void draw_pixels_directly(int x, int y, display::Display *display, Color color_on, Color color_off);
+  void draw_pixel_at(display::Display *display, int screen_x, int screen_y, int img_x, int img_y);
+  Color get_pixel_color(int x, int y) const;
+  
   // Utility methods
   void list_directory_contents(const std::string &dir_path);
   bool extract_jpeg_dimensions(const std::vector<uint8_t> &data, int &width, int &height) const;
   
   // Format helpers
-  image::ImageType get_image_type_from_format() const;
   std::string format_to_string() const;
-  
-  // Update image properties when loading
-  void update_image_properties();
-
-  void draw_pixel_at(display::Display *display, int screen_x, int screen_y, int img_x, int img_y);
 };
 
 // =====================================================
@@ -229,7 +235,6 @@ class SdImageUnloadAction : public Action<Ts...> {
 
 }  // namespace storage
 }  // namespace esphome
-
 
 
 
