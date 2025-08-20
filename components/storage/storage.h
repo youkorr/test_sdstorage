@@ -126,6 +126,11 @@ class SdImageComponent : public Component, public image::Image {
   bool is_loaded() const { return this->image_loaded_; }
   const std::string &get_file_path() const { return this->file_path_; }
   
+  // CRITIQUE: Accès au buffer d'image pour LVGL
+  const std::vector<uint8_t> &get_image_buffer() const { return this->image_buffer_; }
+  uint8_t* get_image_data() { return this->image_buffer_.empty() ? nullptr : this->image_buffer_.data(); }
+  size_t get_image_data_size() const { return this->image_buffer_.size(); }
+  
   // Debug info
   std::string get_debug_info() const;
 
@@ -235,7 +240,6 @@ class SdImageUnloadAction : public Action<Ts...> {
 
 }  // namespace storage
 }  // namespace esphome
-
 
 
 
