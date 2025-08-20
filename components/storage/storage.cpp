@@ -307,6 +307,7 @@ bool SdImageComponent::decode_jpeg_image(const std::vector<uint8_t> &jpeg_data) 
   this->jpeg_decoder_ = new JPEGDEC();
   if (!this->jpeg_decoder_) {
     ESP_LOGE(TAG_IMAGE, "Failed to allocate JPEG decoder");
+    current_image_component = nullptr;
     return false;
   }
   
@@ -404,9 +405,7 @@ int SdImageComponent::jpeg_decode_callback(JPEGDRAW *draw) {
       uint8_t b = draw->pPixels[offset + 2];
       
       // Set pixel in our buffer
-      if (!current_image_component->jpeg_decode_pixel(pixel_x, pixel_y, r, g, b)) {
-        // Continue on error
-      }
+      current_image_component->jpeg_decode_pixel(pixel_x, pixel_y, r, g, b);
     }
   }
   
@@ -444,15 +443,10 @@ bool SdImageComponent::allocate_image_buffer() {
     return false;
   }
   
-  try {
-    this->image_buffer_.clear();
-    this->image_buffer_.resize(buffer_size, 0);
-    ESP_LOGD(TAG_IMAGE, "Allocated image buffer: %zu bytes", buffer_size);
-    return true;
-  } catch (const std::exception& e) {
-    ESP_LOGE(TAG_IMAGE, "Failed to allocate buffer: %zu bytes", buffer_size);
-    return false;
-  }
+  this->image_buffer_.clear();
+  this->image_buffer_.resize(buffer_size, 0);
+  ESP_LOGD(TAG_IMAGE, "Allocated image buffer: %zu bytes", buffer_size);
+  return true;
 }
 
 void SdImageComponent::set_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
@@ -581,6 +575,7 @@ bool SdImageComponent::extract_jpeg_dimensions(const std::vector<uint8_t> &data,
 
 }  // namespace storage
 }  // namespace esphome
+
 
 
 
