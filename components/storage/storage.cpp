@@ -205,7 +205,7 @@ void SdImageComponent::draw(int x, int y, display::Display *display, Color color
         this->draw_pixel_at(display, x + img_x, y + img_y, img_x, img_y);
       }
       
-      if (img_y % 16 == 0) yield(); // Yield périodique
+      if (img_y % 16 == 0) delay(0)// Yield périodique
     }
   }
   
