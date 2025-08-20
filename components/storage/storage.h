@@ -221,6 +221,13 @@ class SdImageComponent : public Component, public image::Image {
   bool decode_jpeg_fallback(const std::vector<uint8_t> &jpeg_data);
   bool decode_png_fallback(const std::vector<uint8_t> &png_data);
   
+  // ===== JPEG DECODING - STACK SAFE IMPLEMENTATION =====
+  int jpeg_draw_callback(JPEGDRAW *pDraw);
+  std::vector<uint8_t> *jpeg_decode_buffer_{nullptr};
+  int jpeg_decode_width_{0};
+  int jpeg_decode_height_{0};
+  volatile bool jpeg_decode_error_{false};
+  
   // ===== DIMENSION EXTRACTION =====
   bool extract_jpeg_dimensions(const std::vector<uint8_t> &data, int &width, int &height) const;
   bool extract_png_dimensions(const std::vector<uint8_t> &data, int &width, int &height) const;
@@ -252,10 +259,6 @@ class SdImageComponent : public Component, public image::Image {
   std::string detect_file_type(const std::string &path) const;
   bool is_supported_format(const std::string &extension) const;
   void list_directory_contents(const std::string &dir_path);
-  
-  // ===== TEMPORARY DATA FOR DECODERS =====
-  std::vector<uint8_t> *jpeg_data_ptr_{nullptr};
-  size_t jpeg_position_{0};
   
 #ifdef USE_PNGDEC  
   PNG png_decoder_;
@@ -333,6 +336,7 @@ class SdImageUnloadAction : public Action<Ts...> {
 
 }  // namespace storage
 }  // namespace esphome
+
 
 
 
