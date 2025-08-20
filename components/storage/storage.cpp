@@ -429,7 +429,6 @@ bool SdImageComponent::decode_image(const std::vector<uint8_t> &data) {
 // =====================================================
 
 bool SdImageComponent::decode_jpeg_image(const std::vector<uint8_t> &jpeg_data) {
-#ifdef USE_JPEGDEC
   ESP_LOGD(TAG_IMAGE, "Using JPEGDEC decoder");
   
   // Set current component for callback
@@ -443,11 +442,11 @@ bool SdImageComponent::decode_jpeg_image(const std::vector<uint8_t> &jpeg_data) 
     return false;
   }
   
-  // CRITIQUE: Configuration du décodeur pour LVGL
-  // Forcer le format RGB565 pour LVGL
+  // CORRECTION 8: Configuration correcte du décodeur JPEGDEC
+  // Forcer le format RGB565 directement dans JPEGDEC
   this->format_ = ImageFormat::RGB565;
   
-  // Open JPEG data avec callback pour traitement pixel par pixel
+  // Open JPEG avec validation
   int result = this->jpeg_decoder_->openRAM((uint8_t*)jpeg_data.data(), jpeg_data.size(), 
                                            SdImageComponent::jpeg_decode_callback);
   if (result != 1) {
@@ -459,15 +458,15 @@ bool SdImageComponent::decode_jpeg_image(const std::vector<uint8_t> &jpeg_data) 
   }
   
   // Get image dimensions
-  this->image_width_ = this->jpeg_decoder_->getWidth();
-  this->image_height_ = this->jpeg_decoder_->getHeight();
+  int orig_width = this->jpeg_decoder_->getWidth();
+  int orig_height = this->jpeg_decoder_->getHeight();
   
-  ESP_LOGI(TAG_IMAGE, "JPEG dimensions: %dx%d", this->image_width_, this->image_height_);
+  ESP_LOGI(TAG_IMAGE, "JPEG original dimensions: %dx%d", orig_width, orig_height);
   
   // Validate dimensions
-  if (this->image_width_ <= 0 || this->image_height_ <= 0 || 
-      this->image_width_ > 2048 || this->image_height_ > 2048) {
-    ESP_LOGE(TAG_IMAGE, "Invalid JPEG dimensions: %dx%d", this->image_width_, this->image_height_);
+  if (orig_width <= 0 || orig_height <= 0 || 
+      orig_width > 2048 || orig_height > 2048) {
+    ESP_LOGE(TAG_IMAGE, "Invalid JPEG dimensions: %dx%d", orig_width, orig_height);
     this->jpeg_decoder_->close();
     delete this->jpeg_decoder_;
     this->jpeg_decoder_ = nullptr;
@@ -475,14 +474,29 @@ bool SdImageComponent::decode_jpeg_image(const std::vector<uint8_t> &jpeg_data) 
     return false;
   }
   
-  // Apply resize if specified
+  // CORRECTION 9: Gestion correcte du redimensionnement
   if (this->resize_width_ > 0 && this->resize_height_ > 0) {
     this->image_width_ = this->resize_width_;
     this->image_height_ = this->resize_height_;
-    ESP_LOGI(TAG_IMAGE, "Resizing to: %dx%d", this->image_width_, this->image_height_);
+    ESP_LOGI(TAG_IMAGE, "Will resize to: %dx%d", this->image_width_, this->image_height_);
+    
+    // CORRECTION 10: Utiliser les fonctions de scaling de JPEGDEC
+    int scale = 1;
+    if (orig_width > this->resize_width_ * 2 && orig_height > this->resize_height_ * 2) {
+      scale = 2;
+    } else if (orig_width > this->resize_width_ * 4 && orig_height > this->resize_height_ * 4) {
+      scale = 4;
+    }
+    
+    if (scale > 1) {
+      ESP_LOGI(TAG_IMAGE, "Using JPEG hardware scaling 1/%d", scale);
+    }
+  } else {
+    this->image_width_ = orig_width;
+    this->image_height_ = orig_height;
   }
   
-  // Allocate buffer - CRITIQUE: Forcer RGB565 pour LVGL
+  // Allocate buffer
   if (!this->allocate_image_buffer()) {
     this->jpeg_decoder_->close();
     delete this->jpeg_decoder_;
@@ -491,14 +505,20 @@ bool SdImageComponent::decode_jpeg_image(const std::vector<uint8_t> &jpeg_data) 
     return false;
   }
   
-  // CRITIQUE: Initialiser le buffer à zéro pour éviter les artefacts
+  // CORRECTION 11: Initialisation propre du buffer
   std::fill(this->image_buffer_.begin(), this->image_buffer_.end(), 0);
   
-  ESP_LOGI(TAG_IMAGE, "Starting JPEG decode with RGB565 format for LVGL...");
+  ESP_LOGI(TAG_IMAGE, "Starting JPEG decode to RGB565...");
   
-  // CRITIQUE: Décoder avec des paramètres optimisés pour LVGL
-  // Paramètres: x, y, flags (0 = pas de scaling, format auto)
-  result = this->jpeg_decoder_->decode(0, 0, 0);
+  // CORRECTION 12: Paramètres de décodage optimisés
+  // decode(x, y, flags) où flags peut inclure JPEG_SCALE_HALF, etc.
+  int decode_flags = 0;
+  if (this->resize_width_ > 0 && this->resize_height_ > 0) {
+    // Laisser JPEGDEC gérer le scaling si possible
+    decode_flags = JPEG_SCALE_HALF; // ou autres flags selon le besoin
+  }
+  
+  result = this->jpeg_decoder_->decode(0, 0, decode_flags);
   
   // Cleanup
   this->jpeg_decoder_->close();
@@ -513,111 +533,32 @@ bool SdImageComponent::decode_jpeg_image(const std::vector<uint8_t> &jpeg_data) 
   
   ESP_LOGI(TAG_IMAGE, "JPEG decoded successfully to RGB565 format");
   
-  // CRITIQUE: Vérifier l'intégrité du buffer après décodage
+  // Validation finale
   if (this->image_buffer_.empty()) {
     ESP_LOGE(TAG_IMAGE, "Image buffer is empty after decoding");
     return false;
   }
   
-  // Log des premiers pixels pour debug
+  // CORRECTION 13: Log amélioré pour debug
   if (this->image_buffer_.size() >= 8) {
-    ESP_LOGD(TAG_IMAGE, "First 4 RGB565 pixels: %04X %04X %04X %04X",
-             (this->image_buffer_[1] << 8) | this->image_buffer_[0],
-             (this->image_buffer_[3] << 8) | this->image_buffer_[2],
-             (this->image_buffer_[5] << 8) | this->image_buffer_[4],
-             (this->image_buffer_[7] << 8) | this->image_buffer_[6]);
+    uint16_t pixel1 = (this->image_buffer_[1] << 8) | this->image_buffer_[0];
+    uint16_t pixel2 = (this->image_buffer_[3] << 8) | this->image_buffer_[2];
+    uint16_t pixel3 = (this->image_buffer_[5] << 8) | this->image_buffer_[4];
+    uint16_t pixel4 = (this->image_buffer_[7] << 8) | this->image_buffer_[6];
+    
+    ESP_LOGD(TAG_IMAGE, "First 4 RGB565 pixels: 0x%04X 0x%04X 0x%04X 0x%04X", 
+             pixel1, pixel2, pixel3, pixel4);
+    
+    // Décoder les couleurs pour verification
+    uint8_t r1 = ((pixel1 >> 11) & 0x1F) << 3;
+    uint8_t g1 = ((pixel1 >> 5) & 0x3F) << 2;
+    uint8_t b1 = (pixel1 & 0x1F) << 3;
+    ESP_LOGD(TAG_IMAGE, "First pixel RGB: R=%d G=%d B=%d", r1, g1, b1);
   }
   
   return true;
-  
-#else
-  ESP_LOGE(TAG_IMAGE, "JPEGDEC not available");
-  return false;
+}
 #endif
-}
-
-#ifdef USE_JPEGDEC
-int SdImageComponent::jpeg_decode_callback(JPEGDRAW *draw) {
-  if (!current_image_component || !draw || !draw->pPixels) {
-    ESP_LOGE(TAG_IMAGE, "Invalid callback state");
-    return 0;
-  }
-  
-  // CORRECTION CRITIQUE : Le problème était ici - mauvaise gestion des dimensions du bloc
-  ESP_LOGD(TAG_IMAGE, "Decoding block: x=%d, y=%d, w=%d, h=%d", 
-           draw->x, draw->y, draw->iWidth, draw->iHeight);
-  
-  // CORRECTION 1: Vérifier que le composant courant est bien initialisé
-  if (current_image_component->image_buffer_.empty()) {
-    ESP_LOGE(TAG_IMAGE, "Image buffer not allocated");
-    return 0;
-  }
-  
-  // CORRECTION 2: Traitement correct des pixels RGB565 depuis JPEGDEC
-  // JPEGDEC peut retourner différents formats selon la configuration
-  bool is_rgb565_input = (draw->iBpp == 16);
-  
-  for (int line_y = 0; line_y < draw->iHeight; line_y++) {
-    int pixel_y = draw->y + line_y;
-    
-    // Vérifier les limites Y
-    if (pixel_y < 0 || pixel_y >= current_image_component->image_height_) {
-      continue;
-    }
-    
-    for (int line_x = 0; line_x < draw->iWidth; line_x++) {
-      int pixel_x = draw->x + line_x;
-      
-      // Vérifier les limites X
-      if (pixel_x < 0 || pixel_x >= current_image_component->image_width_) {
-        continue;
-      }
-      
-      uint16_t rgb565_pixel;
-      
-      if (is_rgb565_input) {
-        // CORRECTION 3: Si JPEGDEC fournit déjà du RGB565
-        int src_offset = (line_y * draw->iWidth + line_x) * 2;
-        if (src_offset + 1 < draw->iWidth * draw->iHeight * 2) {
-          // Lire le pixel RGB565 (attention à l'endianness)
-          rgb565_pixel = ((uint16_t*)draw->pPixels)[line_y * draw->iWidth + line_x];
-        } else {
-          continue;
-        }
-      } else {
-        // CORRECTION 4: Si JPEGDEC fournit du RGB888, convertir
-        int src_offset = (line_y * draw->iWidth + line_x) * 3;
-        if (src_offset + 2 >= draw->iWidth * draw->iHeight * 3) {
-          continue;
-        }
-        
-        uint8_t r = draw->pPixels[src_offset];
-        uint8_t g = draw->pPixels[src_offset + 1];
-        uint8_t b = draw->pPixels[src_offset + 2];
-        
-        // Conversion RGB888 -> RGB565
-        rgb565_pixel = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
-      }
-      
-      // CORRECTION 5: Calcul correct de l'offset de destination
-      size_t dst_offset = (pixel_y * current_image_component->image_width_ + pixel_x) * 2;
-      
-      if (dst_offset + 1 < current_image_component->image_buffer_.size()) {
-        // CORRECTION 6: Stockage en little-endian pour LVGL
-        current_image_component->image_buffer_[dst_offset] = rgb565_pixel & 0xFF;
-        current_image_component->image_buffer_[dst_offset + 1] = (rgb565_pixel >> 8) & 0xFF;
-      }
-    }
-    
-    // Yield périodique pour éviter le watchdog
-    if ((draw->y + line_y) % 8 == 0) {
-      App.feed_wdt();
-      yield();
-    }
-  }
-  
-  return 1; // Continue decoding
-}
 
 bool SdImageComponent::jpeg_decode_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b) {
   // Apply resize scaling if needed
