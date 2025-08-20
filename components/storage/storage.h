@@ -16,23 +16,23 @@
 #ifdef ESP_IDF_VERSION
   // Use JPEGDEC library which works with ESP-IDF
   #define USE_JPEGDEC
-  // Enable PNG decoder
-  #define USE_PNGDEC
+  // Disable PNG for now - library not available
+  // #define USE_PNGDEC
 #else
   // Arduino framework
   #define USE_JPEGDEC
-  #define USE_PNGDEC
+  // #define USE_PNGDEC
 #endif
 
-// Image decoders - use same includes as ESPHome online_image
+// Image decoders - only JPEG for now
 #ifdef USE_JPEGDEC
 #include <JPEGDEC.h>
 #endif
 
-#ifdef USE_PNGDEC
-#include "PNGdec.h"
-
-#endif
+// Remove PNG include for now
+// #ifdef USE_PNGDEC
+// #include <PNGdec.h>
+// #endif
 
 namespace esphome {
 namespace storage {
@@ -161,7 +161,7 @@ class SdImageComponent : public Component, public image::Image {
   enum class FileType {
     UNKNOWN,
     JPEG,
-    PNG,
+    PNG,  // Keep enum but won't be used
     BMP
   };
   
@@ -172,7 +172,7 @@ class SdImageComponent : public Component, public image::Image {
   // Image decoding - ESPHome pattern
   bool decode_image(const std::vector<uint8_t> &data);
   bool decode_jpeg_image(const std::vector<uint8_t> &jpeg_data);
-  bool decode_png_image(const std::vector<uint8_t> &png_data);
+  bool decode_png_image(const std::vector<uint8_t> &png_data);  // Placeholder
   
   // JPEG decoder callbacks (ESPHome pattern)
 #ifdef USE_JPEGDEC
@@ -181,18 +181,10 @@ class SdImageComponent : public Component, public image::Image {
   bool jpeg_decode_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b);
 #endif
 
-  // PNG decoder callbacks (ESPHome pattern)
-#ifdef USE_PNGDEC
-  static void *png_open_callback(const char *filename, int32_t *size);
-  static void png_close_callback(void *handle);
-  static int32_t png_read_callback(PNGFILE *page, uint8_t *buffer, int32_t length);
-  static int32_t png_seek_callback(PNGFILE *page, int32_t position);
-  static void png_draw_callback(PNGDRAW *draw);
-  PNG *png_decoder_{nullptr};
-  std::vector<uint8_t> *png_data_source_{nullptr};
-  size_t png_data_position_{0};
-  bool png_decode_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b, uint8_t a);
-#endif
+  // PNG decoder - disabled for now
+  // #ifdef USE_PNGDEC
+  // ... PNG code will be added later
+  // #endif
 
   // Image processing
   bool allocate_image_buffer();
@@ -255,6 +247,7 @@ class SdImageUnloadAction : public Action<Ts...> {
 
 }  // namespace storage
 }  // namespace esphome
+
 
 
 
