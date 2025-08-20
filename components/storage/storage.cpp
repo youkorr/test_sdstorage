@@ -497,8 +497,8 @@ bool SdImageComponent::decode_jpeg_image(const std::vector<uint8_t> &jpeg_data) 
   ESP_LOGI(TAG_IMAGE, "Starting JPEG decode with RGB565 format for LVGL...");
   
   // CRITIQUE: Décoder avec des paramètres optimisés pour LVGL
-  // Les paramètres 0,0,0 signifient: pas de scaling, format auto, pas de flags spéciaux
-  result = this->jpeg_decoder_->decode(0, 0, JPEG_SCALE_FULL | JPEG_ORDER_RGB);
+  // Paramètres: x, y, flags (0 = pas de scaling, format auto)
+  result = this->jpeg_decoder_->decode(0, 0, 0);
   
   // Cleanup
   this->jpeg_decoder_->close();
