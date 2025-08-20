@@ -16,12 +16,9 @@
 #ifdef ESP_IDF_VERSION
   // Use JPEGDEC library which works with ESP-IDF
   #define USE_JPEGDEC
-  // Disable PNG for now - library not available
-  // #define USE_PNGDEC
 #else
   // Arduino framework
   #define USE_JPEGDEC
-  // #define USE_PNGDEC
 #endif
 
 // Image decoders - only JPEG for now
@@ -29,30 +26,26 @@
 #include <JPEGDEC.h>
 #endif
 
-// Remove PNG include for now
-// #ifdef USE_PNGDEC
-// #include <PNGdec.h>
-// #endif
-
 namespace esphome {
 namespace storage {
 
 // Forward declarations
 class StorageComponent;
+class SdImageComponent;
 
 // Use ESPHome's ImageType enum directly
 using ImageType = image::ImageType;
 
-// Image format enums following ESPHome pattern
+// Image format enums - avoid conflicts with system macros
 enum class ImageFormat {
   RGB565,
   RGB888,
   RGBA
 };
 
-enum class ByteOrder {
-  LITTLE_ENDIAN,
-  BIG_ENDIAN
+enum class SdByteOrder {
+  LITTLE_ENDIAN_SD,
+  BIG_ENDIAN_SD
 };
 
 // =====================================================
@@ -160,19 +153,15 @@ class SdImageComponent : public Component, public image::Image {
   // File type detection
   enum class FileType {
     UNKNOWN,
-    JPEG,
-    PNG,  // Keep enum but won't be used
-    BMP
+    JPEG
   };
   
   FileType detect_file_type(const std::vector<uint8_t> &data) const;
   bool is_jpeg_data(const std::vector<uint8_t> &data) const;
-  bool is_png_data(const std::vector<uint8_t> &data) const;
   
-  // Image decoding - ESPHome pattern
+  // Image decoding - JPEG only for now
   bool decode_image(const std::vector<uint8_t> &data);
   bool decode_jpeg_image(const std::vector<uint8_t> &jpeg_data);
-  bool decode_png_image(const std::vector<uint8_t> &png_data);  // Placeholder
   
   // JPEG decoder callbacks (ESPHome pattern)
 #ifdef USE_JPEGDEC
@@ -180,11 +169,6 @@ class SdImageComponent : public Component, public image::Image {
   JPEGDEC *jpeg_decoder_{nullptr};
   bool jpeg_decode_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b);
 #endif
-
-  // PNG decoder - disabled for now
-  // #ifdef USE_PNGDEC
-  // ... PNG code will be added later
-  // #endif
 
   // Image processing
   bool allocate_image_buffer();
@@ -195,7 +179,6 @@ class SdImageComponent : public Component, public image::Image {
   // Utility methods
   void list_directory_contents(const std::string &dir_path);
   bool extract_jpeg_dimensions(const std::vector<uint8_t> &data, int &width, int &height) const;
-  bool extract_png_dimensions(const std::vector<uint8_t> &data, int &width, int &height) const;
   
   // Format helpers
   ImageType get_image_type_from_format() const;
@@ -247,6 +230,7 @@ class SdImageUnloadAction : public Action<Ts...> {
 
 }  // namespace storage
 }  // namespace esphome
+
 
 
 
