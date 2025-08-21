@@ -38,6 +38,7 @@ CONF_BYTE_ORDER = "byte_order"
 CONF_SD_COMPONENT = "sd_component"
 CONF_SD_IMAGES = "sd_images"
 CONF_FILE_PATH = "file_path"
+CONF_AUTO_LOAD = "auto_load"  # AJOUTÉ: Configuration auto_load
 
 # FIXED: Use simple string mappings instead of enums to avoid compilation issues
 CONF_OUTPUT_IMAGE_FORMATS = {
@@ -55,7 +56,7 @@ CONF_BYTE_ORDERS = {
 SdImageLoadAction = storage_ns.class_("SdImageLoadAction", automation.Action)
 SdImageUnloadAction = storage_ns.class_("SdImageUnloadAction", automation.Action)
 
-# Schema pour SdImageComponent
+# Schema pour SdImageComponent - AJOUTÉ auto_load
 SD_IMAGE_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(SdImageComponent),
@@ -64,6 +65,7 @@ SD_IMAGE_SCHEMA = cv.Schema(
         cv.Optional(CONF_BYTE_ORDER, default="LITTLE_ENDIAN"): cv.enum(CONF_BYTE_ORDERS, upper=True),
         cv.Optional(CONF_RESIZE): cv.dimensions,
         cv.Optional(CONF_TYPE, default="SD_IMAGE"): cv.string,
+        cv.Optional(CONF_AUTO_LOAD, default=True): cv.boolean,  # AJOUTÉ: auto_load par défaut à True
     }
 )
 
@@ -154,6 +156,9 @@ async def setup_sd_image_component(config, parent_storage):
     cg.add(var.set_output_format_string(output_format_str))
     cg.add(var.set_byte_order_string(byte_order_str))
     
+    # AJOUTÉ: Configuration auto_load
+    cg.add(var.set_auto_load(config[CONF_AUTO_LOAD]))
+    
     if CONF_RESIZE in config:
         cg.add(var.set_resize(config[CONF_RESIZE][0], config[CONF_RESIZE][1]))
     
@@ -234,6 +239,10 @@ async def image_to_code_hook(config):
         
         cg.add(var.set_output_format_string(format_str))
         cg.add(var.set_byte_order_string(byte_order_str))
+        
+        # AJOUTÉ: Configuration auto_load dans le hook aussi
+        auto_load = config.get(CONF_AUTO_LOAD, True)
+        cg.add(var.set_auto_load(auto_load))
         
         return var
     
