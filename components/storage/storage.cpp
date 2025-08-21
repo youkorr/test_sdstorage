@@ -153,7 +153,7 @@ void SdImageComponent::setup() {
       ESP_LOGI(TAG_IMAGE, "Image auto-loaded successfully!");
     } else {
       ESP_LOGW(TAG_IMAGE, "Failed to auto-load image during setup");
-      ESP_LOGI(TAG_IMAGE, "Will retry loading every %d seconds in loop()", RETRY_INTERVAL_MS / 1000);
+      ESP_LOGI(TAG_IMAGE, "Will retry loading every %d seconds in loop()", RETRY_INTERVAL_MS / 5000);
       
       // Activer le système de retry
       this->retry_load_ = true;
