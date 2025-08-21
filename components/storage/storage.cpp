@@ -134,11 +134,30 @@ void SdImageComponent::setup() {
   ESP_LOGCONFIG(TAG_IMAGE, "  Storage component: %s", this->storage_component_ ? "configured" : "not configured");
   ESP_LOGCONFIG(TAG_IMAGE, "  Decoders: JPEG available");
   
-  // Pour l'instant, désactiver auto_load dans setup() 
-  // Laisser le chargement manuel via bouton pour que ça fonctionne
+  // CRITIQUE: Chargement automatique avec plus de vérifications
   if (this->auto_load_) {
-    ESP_LOGI(TAG_IMAGE, "Auto-load is enabled but currently disabled in setup() - use manual load");
-    // TODO: Implémenter auto_load après avoir résolu le problème de timing
+    if (this->file_path_.empty()) {
+      ESP_LOGW(TAG_IMAGE, "Auto-load enabled but no file path configured!");
+      return;
+    }
+    
+    if (!this->storage_component_) {
+      ESP_LOGW(TAG_IMAGE, "Auto-load enabled but no storage component configured!");
+      return;
+    }
+    
+    // Attendre un peu que la carte SD soit prête
+    ESP_LOGI(TAG_IMAGE, "Waiting for SD card to be ready...");
+    delay(500); // Attendre 500ms
+    
+    ESP_LOGI(TAG_IMAGE, "Auto-loading image from: %s", this->file_path_.c_str());
+    if (this->load_image()) {
+      ESP_LOGI(TAG_IMAGE, "Image auto-loaded successfully!");
+    } else {
+      ESP_LOGW(TAG_IMAGE, "Failed to auto-load image, will retry later");
+      // Programmer un retry dans la loop()
+      this->retry_load_ = true;
+    }
   }
 }
 
@@ -768,6 +787,8 @@ bool SdImageComponent::extract_jpeg_dimensions(const std::vector<uint8_t> &data,
 
 }  // namespace storage
 }  // namespace esphome
+
+
 
 
 
