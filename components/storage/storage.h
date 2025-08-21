@@ -194,9 +194,6 @@ class SdImageComponent : public Component, public image::Image {
   // Format helpers
   std::string format_to_string() const;
 
-    // JPEG decoder callback
-  static int jpeg_decode_callback(JPEGDRAW *pDraw);
-  static int jpeg_decode_callback(jpeg_draw_tag *pDraw); // Alternative signature
 };
 
 // =====================================================
