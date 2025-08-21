@@ -11,6 +11,7 @@
 #include "esphome/components/image/image.h"
 #include "esphome/components/display/display.h"
 #include "../sd_mmc_card/sd_mmc_card.h"
+#include "esphome/core/hal.h"
 
 // Image decoder configuration for ESP-IDF
 #ifdef ESP_IDF_VERSION
