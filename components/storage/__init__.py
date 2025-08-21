@@ -38,7 +38,7 @@ CONF_BYTE_ORDER = "byte_order"
 CONF_SD_COMPONENT = "sd_component"
 CONF_SD_IMAGES = "sd_images"
 CONF_FILE_PATH = "file_path"
-CONF_AUTO_LOAD = "auto_load"  # AJOUTÉ: Configuration auto_load
+CONF_AUTO_LOAD = "auto_load"  # Uniquement pour sd_images, pas pour storage
 
 # FIXED: Use simple string mappings instead of enums to avoid compilation issues
 CONF_OUTPUT_IMAGE_FORMATS = {
@@ -56,7 +56,7 @@ CONF_BYTE_ORDERS = {
 SdImageLoadAction = storage_ns.class_("SdImageLoadAction", automation.Action)
 SdImageUnloadAction = storage_ns.class_("SdImageUnloadAction", automation.Action)
 
-# Schema pour SdImageComponent - AJOUTÉ auto_load
+# Schema pour SdImageComponent - auto_load UNIQUEMENT ICI
 SD_IMAGE_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(SdImageComponent),
@@ -65,11 +65,11 @@ SD_IMAGE_SCHEMA = cv.Schema(
         cv.Optional(CONF_BYTE_ORDER, default="LITTLE_ENDIAN"): cv.enum(CONF_BYTE_ORDERS, upper=True),
         cv.Optional(CONF_RESIZE): cv.dimensions,
         cv.Optional(CONF_TYPE, default="SD_IMAGE"): cv.string,
-        cv.Optional(CONF_AUTO_LOAD, default=True): cv.boolean,  # AJOUTÉ: auto_load par défaut à True
+        cv.Optional(CONF_AUTO_LOAD, default=True): cv.boolean,  # auto_load SEULEMENT pour les sd_images
     }
 )
 
-# Schema de validation pour StorageComponent
+# Schema de validation pour StorageComponent - PAS d'auto_load ici
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(StorageComponent),
@@ -77,6 +77,7 @@ CONFIG_SCHEMA = cv.Schema(
         cv.Optional(CONF_SD_COMPONENT): cv.use_id(SdMmc),
         cv.Optional(CONF_ROOT_PATH, default="/"): cv.string,
         cv.Optional(CONF_SD_IMAGES, default=[]): cv.ensure_list(SD_IMAGE_SCHEMA),
+        # PAS d'auto_load dans le schema principal - uniquement dans sd_images
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -121,7 +122,7 @@ automation.register_action(
 async def to_code(config):
     """Génère le code C++ pour le composant storage"""
     
-    # Créer le composant principal
+    # Créer le composant principal - PAS d'auto_load ici
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     
@@ -133,7 +134,7 @@ async def to_code(config):
         sd_comp = await cg.get_variable(config[CONF_SD_COMPONENT])
         cg.add(var.set_sd_component(sd_comp))
     
-    # Configuration des images SD
+    # Configuration des images SD - auto_load configuré ici
     if CONF_SD_IMAGES in config:
         for img_config in config[CONF_SD_IMAGES]:
             await setup_sd_image_component(img_config, var)
@@ -156,7 +157,7 @@ async def setup_sd_image_component(config, parent_storage):
     cg.add(var.set_output_format_string(output_format_str))
     cg.add(var.set_byte_order_string(byte_order_str))
     
-    # AJOUTÉ: Configuration auto_load
+    # Configuration auto_load - SEULEMENT pour les sd_images
     cg.add(var.set_auto_load(config[CONF_AUTO_LOAD]))
     
     if CONF_RESIZE in config:
@@ -240,7 +241,7 @@ async def image_to_code_hook(config):
         cg.add(var.set_output_format_string(format_str))
         cg.add(var.set_byte_order_string(byte_order_str))
         
-        # AJOUTÉ: Configuration auto_load dans le hook aussi
+        # Configuration auto_load dans le hook aussi - SEULEMENT si présent
         auto_load = config.get(CONF_AUTO_LOAD, True)
         cg.add(var.set_auto_load(auto_load))
         
