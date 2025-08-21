@@ -150,6 +150,11 @@ class SdImageComponent : public Component, public image::Image {
   ImageFormat format_{ImageFormat::RGB565};
 
  private:
+  // Retry logic for image loading
+  bool retry_load_{false};
+  uint32_t last_retry_attempt_{0};
+  static const uint32_t RETRY_INTERVAL_MS = 2000; // Retry toutes les 2 secondes
+  
   // File type detection
   enum class FileType {
     UNKNOWN,
