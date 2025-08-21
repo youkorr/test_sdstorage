@@ -134,23 +134,11 @@ void SdImageComponent::setup() {
   ESP_LOGCONFIG(TAG_IMAGE, "  Storage component: %s", this->storage_component_ ? "configured" : "not configured");
   ESP_LOGCONFIG(TAG_IMAGE, "  Decoders: JPEG available");
   
-  // Auto-load : NE PAS charger dans setup(), retarder vers loop()
+  // Pour l'instant, désactiver auto_load dans setup() 
+  // Laisser le chargement manuel via bouton pour que ça fonctionne
   if (this->auto_load_) {
-    if (this->file_path_.empty()) {
-      ESP_LOGW(TAG_IMAGE, "Auto-load enabled but no file path configured!");
-      return;
-    }
-    
-    if (!this->storage_component_) {
-      ESP_LOGW(TAG_IMAGE, "Auto-load enabled but no storage component configured!");
-      return;
-    }
-    
-    ESP_LOGI(TAG_IMAGE, "Auto-load scheduled for loop() in 2 seconds...");
-    
-    // Programmer le chargement différé dans loop()
-    this->retry_load_ = true;
-    this->last_retry_attempt_ = 0; // Force immediate attempt on first loop
+    ESP_LOGI(TAG_IMAGE, "Auto-load is enabled but currently disabled in setup() - use manual load");
+    // TODO: Implémenter auto_load après avoir résolu le problème de timing
   }
 }
 
