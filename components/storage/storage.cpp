@@ -134,7 +134,7 @@ void SdImageComponent::setup() {
   ESP_LOGCONFIG(TAG_IMAGE, "  Storage component: %s", this->storage_component_ ? "configured" : "not configured");
   ESP_LOGCONFIG(TAG_IMAGE, "  Decoders: JPEG available");
   
-  // Auto-load avec vérifications et système de retry
+  // Auto-load : NE PAS charger dans setup(), retarder vers loop()
   if (this->auto_load_) {
     if (this->file_path_.empty()) {
       ESP_LOGW(TAG_IMAGE, "Auto-load enabled but no file path configured!");
@@ -146,19 +146,11 @@ void SdImageComponent::setup() {
       return;
     }
     
-    ESP_LOGI(TAG_IMAGE, "Auto-loading image from: %s", this->file_path_.c_str());
+    ESP_LOGI(TAG_IMAGE, "Auto-load scheduled for loop() in 2 seconds...");
     
-    // Essayer de charger immédiatement
-    if (this->load_image()) {
-      ESP_LOGI(TAG_IMAGE, "Image auto-loaded successfully!");
-    } else {
-      ESP_LOGW(TAG_IMAGE, "Failed to auto-load image during setup");
-      ESP_LOGI(TAG_IMAGE, "Will retry loading every %d seconds in loop()", RETRY_INTERVAL_MS / 5000);
-      
-      // Activer le système de retry
-      this->retry_load_ = true;
-      this->last_retry_attempt_ = millis();
-    }
+    // Programmer le chargement différé dans loop()
+    this->retry_load_ = true;
+    this->last_retry_attempt_ = 0; // Force immediate attempt on first loop
   }
 }
 
