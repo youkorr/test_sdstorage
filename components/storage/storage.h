@@ -34,6 +34,10 @@
 #include <pngle.h>
 #endif
 
+#ifdef USE_PNGLE
+#include "pngle.h"
+#endif
+
 namespace esphome {
 namespace storage {
 
