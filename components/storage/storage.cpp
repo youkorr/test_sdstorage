@@ -1123,17 +1123,24 @@ bool SdImageComponent::resize_image_buffer_bilinear(int src_width, int src_heigh
 bool SdImageComponent::allocate_image_buffer() {
   size_t buffer_size = this->get_buffer_size();
   
-  if (buffer_size == 0 || buffer_size > 16 * 1024 * 1024) { // 16MB limit for ESP32S3
+  if (buffer_size == 0 || buffer_size > 16 * 1024 * 1024) {
     ESP_LOGE(TAG_IMAGE, "Invalid buffer size: %zu bytes", buffer_size);
     return false;
   }
   
   this->image_buffer_.clear();
   
-  try {
-    this->image_buffer_.resize(buffer_size, 0);
-  } catch (const std::bad_alloc& e) {
+  // Use reserve and resize without try-catch since exceptions are disabled
+  this->image_buffer_.reserve(buffer_size);
+  if (this->image_buffer_.capacity() < buffer_size) {
+    ESP_LOGE(TAG_IMAGE, "Failed to reserve %zu bytes for image buffer", buffer_size);
+    return false;
+  }
+  
+  this->image_buffer_.resize(buffer_size, 0);
+  if (this->image_buffer_.size() != buffer_size) {
     ESP_LOGE(TAG_IMAGE, "Failed to allocate %zu bytes for image buffer", buffer_size);
+    this->image_buffer_.clear();
     return false;
   }
   
