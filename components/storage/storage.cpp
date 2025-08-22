@@ -963,11 +963,7 @@ bool SdImageComponent::decode_png_image(const std::vector<uint8_t> &png_data) {
   return false;
 }
 
-void SdImageComponent::png_init_callback(pngle_t *pngle, uint32_t w, uint32_t h) {}
-void SdImageComponent::png_draw_callback(pngle_t *pngle, uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint8_t rgba[4]) {}
-void SdImageComponent::png_done_callback(pngle_t *pngle) {}
-void SdImageComponent::png_init_callback_no_resize(pngle_t *pngle, uint32_t w, uint32_t h) {}
-void SdImageComponent::png_draw_callback_no_resize(pngle_t *pngle, uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint8_t rgba[4]) {}
+
 
 #endif // USE_PNGLE
 
