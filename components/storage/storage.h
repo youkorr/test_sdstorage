@@ -15,13 +15,23 @@
 // Image decoder configuration for ESP-IDF
 #ifdef ESP_IDF_VERSION
   #define USE_JPEGDEC
+  #ifdef CONFIG_ESPHOME_ENABLE_PNGLE
+    #define USE_PNGLE
+  #endif
 #else
   #define USE_JPEGDEC
+  #ifdef ENABLE_PNGLE
+    #define USE_PNGLE
+  #endif
 #endif
 
-// Image decoders - only JPEG for now
+// Image decoders
 #ifdef USE_JPEGDEC
 #include <JPEGDEC.h>
+#endif
+
+#ifdef USE_PNGLE
+#include <pngle.h>
 #endif
 
 namespace esphome {
@@ -78,15 +88,13 @@ class StorageComponent : public Component {
 };
 
 // =====================================================
-// SdImageComponent - Version corrigée pour ESPHome/LVGL
+// SdImageComponent - SD Card Image Component
 // =====================================================
 class SdImageComponent : public Component, public image::Image {
  public:
-  // Constructeur CRITIQUE - doit initialiser la classe de base avec des données valides
+  // Constructor - initializes base Image class with valid data
   SdImageComponent() : Component(), 
-                       image::Image(nullptr, 0, 0, image::IMAGE_TYPE_RGB565, image::TRANSPARENCY_OPAQUE) {
-    // Initialisation de base
-  }
+                       image::Image(nullptr, 0, 0, image::IMAGE_TYPE_RGB565, image::TRANSPARENCY_OPAQUE) {}
 
   // Component lifecycle
   void setup() override;
@@ -108,7 +116,7 @@ class SdImageComponent : public Component, public image::Image {
   void set_output_format_string(const std::string &format);
   void set_byte_order_string(const std::string &byte_order);
   
-  // CRITIQUE: Override des méthodes Image avec la signature exacte du code source ESPHome
+  // Override Image methods with exact ESPHome signatures
   void draw(int x, int y, display::Display *display, Color color_on, Color color_off) override;
   int get_width() const override { return this->get_current_width(); }
   int get_height() const override { return this->get_current_height(); }
@@ -119,14 +127,14 @@ class SdImageComponent : public Component, public image::Image {
   void unload_image();
   bool reload_image();
   
-  // CRITIQUE: Méthode pour finaliser le chargement
+  // Finalize loading
   void finalize_image_load();
   
   // Status
   bool is_loaded() const { return this->image_loaded_; }
   const std::string &get_file_path() const { return this->file_path_; }
   
-  // CRITIQUE: Accès au buffer d'image pour LVGL
+  // Image buffer access for LVGL
   const std::vector<uint8_t> &get_image_buffer() const { return this->image_buffer_; }
   uint8_t* get_image_data() { return this->image_buffer_.empty() ? nullptr : this->image_buffer_.data(); }
   size_t get_image_data_size() const { return this->image_buffer_.size(); }
@@ -142,7 +150,7 @@ class SdImageComponent : public Component, public image::Image {
   bool image_loaded_{false};
   bool auto_load_{true};
   
-  // Image properties - locales
+  // Image properties - local
   int image_width_{0};
   int image_height_{0};
   int resize_width_{0};
@@ -153,26 +161,39 @@ class SdImageComponent : public Component, public image::Image {
   // Retry logic for image loading
   bool retry_load_{false};
   uint32_t last_retry_attempt_{0};
-  static const uint32_t RETRY_INTERVAL_MS = 2000; // Retry toutes les 2 secondes
+  static const uint32_t RETRY_INTERVAL_MS = 2000;
   
   // File type detection
   enum class FileType {
     UNKNOWN,
-    JPEG
+    JPEG,
+    PNG
   };
   
   FileType detect_file_type(const std::vector<uint8_t> &data) const;
   bool is_jpeg_data(const std::vector<uint8_t> &data) const;
+  bool is_png_data(const std::vector<uint8_t> &data) const;
   
-  // Image decoding - JPEG only for now
+  // Image decoding
   bool decode_image(const std::vector<uint8_t> &data);
   bool decode_jpeg_image(const std::vector<uint8_t> &jpeg_data);
+  bool decode_png_image(const std::vector<uint8_t> &png_data);
   
-  // JPEG decoder callbacks
+  // Decoder callbacks and helpers
 #ifdef USE_JPEGDEC
   static int jpeg_decode_callback(JPEGDRAW *draw);
+  static int jpeg_decode_callback_no_resize(JPEGDRAW *draw);
   JPEGDEC *jpeg_decoder_{nullptr};
   bool jpeg_decode_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b);
+#endif
+
+#ifdef USE_PNGLE
+  static void png_init_callback(pngle_t *pngle, uint32_t w, uint32_t h);
+  static void png_draw_callback(pngle_t *pngle, uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint8_t rgba[4]);
+  static void png_done_callback(pngle_t *pngle);
+  static void png_init_callback_no_resize(pngle_t *pngle, uint32_t w, uint32_t h);
+  static void png_draw_callback_no_resize(pngle_t *pngle, uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint8_t rgba[4]);
+  pngle_t *png_decoder_{nullptr};
 #endif
 
   // Image processing
@@ -181,7 +202,11 @@ class SdImageComponent : public Component, public image::Image {
   size_t get_pixel_size() const;
   size_t get_buffer_size() const;
   
-  // CRITIQUE: Mise à jour des propriétés de la classe de base selon le code source ESPHome
+  // Resize methods
+  bool resize_image_buffer(int src_width, int src_height, int dst_width, int dst_height);
+  bool resize_image_buffer_bilinear(int src_width, int src_height, int dst_width, int dst_height);
+  
+  // Base class property updates
   void update_base_image_properties();
   
   int get_current_width() const;
@@ -198,7 +223,6 @@ class SdImageComponent : public Component, public image::Image {
   
   // Format helpers
   std::string format_to_string() const;
-
 };
 
 // =====================================================
