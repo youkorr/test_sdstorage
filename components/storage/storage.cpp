@@ -1,6 +1,6 @@
 #include "storage.h"
 #include "esphome/core/log.h"
-#include "esphome/core/application.h"  // For App.feed_wdt()
+#include "esphome/core/application.h"
 #include <sys/stat.h>
 #include <dirent.h>
 #include <errno.h>
@@ -132,9 +132,21 @@ void SdImageComponent::setup() {
   ESP_LOGCONFIG(TAG_IMAGE, "  Format: %s", this->format_to_string().c_str());
   ESP_LOGCONFIG(TAG_IMAGE, "  Auto load: %s", this->auto_load_ ? "YES" : "NO");
   ESP_LOGCONFIG(TAG_IMAGE, "  Storage component: %s", this->storage_component_ ? "configured" : "not configured");
-  ESP_LOGCONFIG(TAG_IMAGE, "  Decoders: JPEG available");
+  ESP_LOGCONFIG(TAG_IMAGE, "  Decoders: JPEG %s, PNG %s", 
+#ifdef USE_JPEGDEC
+                "available"
+#else
+                "not available"
+#endif
+                ,
+#ifdef USE_PNGLE
+                "available"
+#else
+                "not available"
+#endif
+                );
   
-  // CRITIQUE: Chargement automatique avec plus de vérifications
+  // Auto-loading with additional checks
   if (this->auto_load_) {
     if (this->file_path_.empty()) {
       ESP_LOGW(TAG_IMAGE, "Auto-load enabled but no file path configured!");
@@ -146,23 +158,36 @@ void SdImageComponent::setup() {
       return;
     }
     
-    // Attendre un peu que la carte SD soit prête
+    // Wait for SD card to be ready
     ESP_LOGI(TAG_IMAGE, "Waiting for SD card to be ready...");
-    delay(500); // Attendre 500ms
+    delay(500);
     
     ESP_LOGI(TAG_IMAGE, "Auto-loading image from: %s", this->file_path_.c_str());
     if (this->load_image()) {
       ESP_LOGI(TAG_IMAGE, "Image auto-loaded successfully!");
     } else {
       ESP_LOGW(TAG_IMAGE, "Failed to auto-load image, will retry later");
-      // Programmer un retry dans la loop()
       this->retry_load_ = true;
     }
   }
 }
 
 void SdImageComponent::loop() {
-  // Nothing to do in loop
+  // Retry logic for auto-loading
+  if (this->retry_load_ && !this->image_loaded_) {
+    uint32_t now = millis();
+    if (now - this->last_retry_attempt_ > RETRY_INTERVAL_MS) {
+      this->last_retry_attempt_ = now;
+      ESP_LOGI(TAG_IMAGE, "Retrying auto-load...");
+      
+      if (this->load_image()) {
+        ESP_LOGI(TAG_IMAGE, "Image loaded successfully on retry!");
+        this->retry_load_ = false;
+      } else {
+        ESP_LOGW(TAG_IMAGE, "Retry failed, will try again later");
+      }
+    }
+  }
 }
 
 void SdImageComponent::dump_config() {
@@ -196,7 +221,7 @@ void SdImageComponent::set_byte_order_string(const std::string &byte_order) {
   ESP_LOGD(TAG_IMAGE, "Byte order set to: %s", byte_order.c_str());
 }
 
-// Implementation de la méthode draw() selon le code source ESPHome
+// Implementation of draw() method according to ESPHome source code
 void SdImageComponent::draw(int x, int y, display::Display *display, Color color_on, Color color_off) {
   if (!this->image_loaded_ || this->image_buffer_.empty()) {
     ESP_LOGW(TAG_IMAGE, "Cannot draw: image not loaded");
@@ -207,14 +232,14 @@ void SdImageComponent::draw(int x, int y, display::Display *display, Color color
            this->get_current_width(), this->get_current_height(), x, y,
            this->width_, this->height_, this->data_start_);
   
-  // Si les données de base sont correctes, utiliser la méthode optimisée d'ESPHome
+  // If base data is correct, use ESPHome's optimized method
   if (this->data_start_ && this->width_ > 0 && this->height_ > 0) {
     ESP_LOGD(TAG_IMAGE, "Using ESPHome base image draw method");
-    // Appeler la méthode de base qui gère le clipping et l'optimisation
+    // Call base method that handles clipping and optimization
     image::Image::draw(x, y, display, color_on, color_off);
   } else {
     ESP_LOGD(TAG_IMAGE, "Using fallback pixel-by-pixel drawing");
-    // Fallback: dessiner pixel par pixel
+    // Fallback: draw pixel by pixel
     this->draw_pixels_directly(x, y, display, color_on, color_off);
   }
 }
@@ -274,7 +299,7 @@ bool SdImageComponent::load_image_from_path(const std::string &path) {
   this->file_path_ = path;
   this->image_loaded_ = true;
   
-  // Finaliser le chargement en mettant à jour les propriétés de base
+  // Finalize loading by updating base properties
   this->finalize_image_load();
   
   ESP_LOGI(TAG_IMAGE, "Image loaded successfully: %dx%d, %zu bytes", 
@@ -290,7 +315,7 @@ void SdImageComponent::unload_image() {
   this->image_width_ = 0;
   this->image_height_ = 0;
   
-  // Réinitialiser aussi les propriétés de la classe de base
+  // Reset base class properties as well
   this->width_ = 0;
   this->height_ = 0;
   this->data_start_ = nullptr;
@@ -303,7 +328,6 @@ bool SdImageComponent::reload_image() {
   return this->load_image_from_path(path);
 }
 
-// Implémentation de finalize_image_load()
 void SdImageComponent::finalize_image_load() {
   if (this->image_loaded_) {
     this->update_base_image_properties();
@@ -312,9 +336,8 @@ void SdImageComponent::finalize_image_load() {
   }
 }
 
-// Mise à jour des propriétés de la classe de base selon le code source ESPHome
 void SdImageComponent::update_base_image_properties() {
-  // Mettre à jour les membres de la classe de base
+  // Update base class members
   this->width_ = this->get_current_width();
   this->height_ = this->get_current_height();
   this->type_ = this->get_esphome_image_type();
@@ -322,7 +345,7 @@ void SdImageComponent::update_base_image_properties() {
   if (!this->image_buffer_.empty()) {
     this->data_start_ = this->image_buffer_.data();
     
-    // Calculer bpp selon le code source ESPHome
+    // Calculate bpp according to ESPHome source code
     switch (this->type_) {
       case image::IMAGE_TYPE_BINARY:
         this->bpp_ = 1;
@@ -358,13 +381,12 @@ image::ImageType SdImageComponent::get_esphome_image_type() const {
   switch (this->format_) {
     case ImageFormat::RGB565: return image::IMAGE_TYPE_RGB565;
     case ImageFormat::RGB888: return image::IMAGE_TYPE_RGB;
-    case ImageFormat::RGBA: return image::IMAGE_TYPE_RGB; // ESPHome n'a pas de RGBA natif
+    case ImageFormat::RGBA: return image::IMAGE_TYPE_RGB; // ESPHome doesn't have native RGBA
     default: return image::IMAGE_TYPE_RGB565;
   }
 }
 
 void SdImageComponent::draw_pixels_directly(int x, int y, display::Display *display, Color color_on, Color color_off) {
-  // Méthode de fallback pour dessiner directement
   ESP_LOGD(TAG_IMAGE, "Drawing %dx%d pixels directly", this->get_current_width(), this->get_current_height());
   
   for (int img_y = 0; img_y < this->get_current_height(); img_y++) {
@@ -373,7 +395,7 @@ void SdImageComponent::draw_pixels_directly(int x, int y, display::Display *disp
       display->draw_pixel_at(x + img_x, y + img_y, pixel_color);
     }
     
-    // Yield périodique pour éviter le watchdog
+    // Yield periodically to avoid watchdog
     if (img_y % 32 == 0) {
       App.feed_wdt();
       yield();
@@ -422,11 +444,19 @@ Color SdImageComponent::get_pixel_color(int x, int y) const {
 // File type detection
 SdImageComponent::FileType SdImageComponent::detect_file_type(const std::vector<uint8_t> &data) const {
   if (this->is_jpeg_data(data)) return FileType::JPEG;
+  if (this->is_png_data(data)) return FileType::PNG;
   return FileType::UNKNOWN;
 }
 
 bool SdImageComponent::is_jpeg_data(const std::vector<uint8_t> &data) const {
   return data.size() >= 4 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF;
+}
+
+bool SdImageComponent::is_png_data(const std::vector<uint8_t> &data) const {
+  // PNG signature: 89 50 4E 47 0D 0A 1A 0A
+  return data.size() >= 8 && 
+         data[0] == 0x89 && data[1] == 0x50 && data[2] == 0x4E && data[3] == 0x47 &&
+         data[4] == 0x0D && data[5] == 0x0A && data[6] == 0x1A && data[7] == 0x0A;
 }
 
 // Image decoding
@@ -438,23 +468,27 @@ bool SdImageComponent::decode_image(const std::vector<uint8_t> &data) {
       ESP_LOGI(TAG_IMAGE, "Decoding JPEG image");
       return this->decode_jpeg_image(data);
       
+    case FileType::PNG:
+      ESP_LOGI(TAG_IMAGE, "Decoding PNG image");
+      return this->decode_png_image(data);
+      
     default:
-      ESP_LOGE(TAG_IMAGE, "Unsupported image format (only JPEG supported in this build)");
+      ESP_LOGE(TAG_IMAGE, "Unsupported image format (only JPEG and PNG supported)");
       return false;
   }
 }
 
 // =====================================================
-// JPEG Decoder Implementation (ESPHome style)
+// JPEG Decoder Implementation (with fixed resize)
 // =====================================================
 
+#ifdef USE_JPEGDEC
+
 bool SdImageComponent::decode_jpeg_image(const std::vector<uint8_t> &jpeg_data) {
-  ESP_LOGD(TAG_IMAGE, "Using JPEGDEC decoder");
+  ESP_LOGD(TAG_IMAGE, "Using JPEGDEC decoder with post-decode resize");
   
-  // Set current component for callback
   current_image_component = this;
   
-  // Create decoder
   this->jpeg_decoder_ = new JPEGDEC();
   if (!this->jpeg_decoder_) {
     ESP_LOGE(TAG_IMAGE, "Failed to allocate JPEG decoder");
@@ -462,13 +496,8 @@ bool SdImageComponent::decode_jpeg_image(const std::vector<uint8_t> &jpeg_data) 
     return false;
   }
   
-  // Configuration correcte du décodeur JPEGDEC
-  // Forcer le format RGB565 directement dans JPEGDEC
-  this->format_ = ImageFormat::RGB565;
-  
-  // Open JPEG avec validation
   int result = this->jpeg_decoder_->openRAM((uint8_t*)jpeg_data.data(), jpeg_data.size(), 
-                                           SdImageComponent::jpeg_decode_callback);
+                                           SdImageComponent::jpeg_decode_callback_no_resize);
   if (result != 1) {
     ESP_LOGE(TAG_IMAGE, "Failed to open JPEG data: %d", result);
     delete this->jpeg_decoder_;
@@ -477,7 +506,7 @@ bool SdImageComponent::decode_jpeg_image(const std::vector<uint8_t> &jpeg_data) 
     return false;
   }
   
-  // Get image dimensions
+  // Get original dimensions
   int orig_width = this->jpeg_decoder_->getWidth();
   int orig_height = this->jpeg_decoder_->getHeight();
   
@@ -494,17 +523,12 @@ bool SdImageComponent::decode_jpeg_image(const std::vector<uint8_t> &jpeg_data) 
     return false;
   }
   
-  // Gestion correcte du redimensionnement
-  if (this->resize_width_ > 0 && this->resize_height_ > 0) {
-    this->image_width_ = this->resize_width_;
-    this->image_height_ = this->resize_height_;
-    ESP_LOGI(TAG_IMAGE, "Will resize to: %dx%d", this->image_width_, this->image_height_);
-  } else {
-    this->image_width_ = orig_width;
-    this->image_height_ = orig_height;
-  }
+  // Temporarily set dimensions to original for decoding
+  this->image_width_ = orig_width;
+  this->image_height_ = orig_height;
+  this->format_ = ImageFormat::RGB565;
   
-  // Allocate buffer
+  // Allocate temporary buffer for original size
   if (!this->allocate_image_buffer()) {
     this->jpeg_decoder_->close();
     delete this->jpeg_decoder_;
@@ -513,18 +537,11 @@ bool SdImageComponent::decode_jpeg_image(const std::vector<uint8_t> &jpeg_data) 
     return false;
   }
   
-  // Initialisation propre du buffer
-  std::fill(this->image_buffer_.begin(), this->image_buffer_.end(), 0);
+  ESP_LOGI(TAG_IMAGE, "Decoding JPEG at original size...");
   
-  ESP_LOGI(TAG_IMAGE, "Starting JPEG decode to RGB565...");
+  // Decode at original size
+  result = this->jpeg_decoder_->decode(0, 0, 0);
   
-  // Paramètres de décodage optimisés
-  // decode(x, y, flags)
-  int decode_flags = 0;
-  
-  result = this->jpeg_decoder_->decode(0, 0, decode_flags);
-  
-  // Cleanup
   this->jpeg_decoder_->close();
   delete this->jpeg_decoder_;
   this->jpeg_decoder_ = nullptr;
@@ -535,88 +552,51 @@ bool SdImageComponent::decode_jpeg_image(const std::vector<uint8_t> &jpeg_data) 
     return false;
   }
   
-  ESP_LOGI(TAG_IMAGE, "JPEG decoded successfully to RGB565 format");
-  
-  // Validation finale
-  if (this->image_buffer_.empty()) {
-    ESP_LOGE(TAG_IMAGE, "Image buffer is empty after decoding");
-    return false;
+  // Now resize if needed
+  if (this->resize_width_ > 0 && this->resize_height_ > 0 &&
+      (this->resize_width_ != orig_width || this->resize_height_ != orig_height)) {
+    
+    ESP_LOGI(TAG_IMAGE, "Resizing JPEG from %dx%d to %dx%d", 
+             orig_width, orig_height, this->resize_width_, this->resize_height_);
+    
+    if (!this->resize_image_buffer(orig_width, orig_height, 
+                                  this->resize_width_, this->resize_height_)) {
+      ESP_LOGE(TAG_IMAGE, "Failed to resize JPEG image");
+      return false;
+    }
+    
+    // Update dimensions
+    this->image_width_ = this->resize_width_;
+    this->image_height_ = this->resize_height_;
   }
   
-  // Log amélioré pour debug
-  if (this->image_buffer_.size() >= 8) {
-    uint16_t pixel1 = (this->image_buffer_[1] << 8) | this->image_buffer_[0];
-    uint16_t pixel2 = (this->image_buffer_[3] << 8) | this->image_buffer_[2];
-    uint16_t pixel3 = (this->image_buffer_[5] << 8) | this->image_buffer_[4];
-    uint16_t pixel4 = (this->image_buffer_[7] << 8) | this->image_buffer_[6];
-    
-    ESP_LOGD(TAG_IMAGE, "First 4 RGB565 pixels: 0x%04X 0x%04X 0x%04X 0x%04X", 
-             pixel1, pixel2, pixel3, pixel4);
-    
-    // Décoder les couleurs pour verification
-    uint8_t r1 = ((pixel1 >> 11) & 0x1F) << 3;
-    uint8_t g1 = ((pixel1 >> 5) & 0x3F) << 2;
-    uint8_t b1 = (pixel1 & 0x1F) << 3;
-    ESP_LOGD(TAG_IMAGE, "First pixel RGB: R=%d G=%d B=%d", r1, g1, b1);
-  }
+  ESP_LOGI(TAG_IMAGE, "JPEG processed successfully: %dx%d", 
+           this->image_width_, this->image_height_);
   
   return true;
 }
 
-// =====================================================
-// JPEG Decoder Callback Implementation
-// =====================================================
-
-int SdImageComponent::jpeg_decode_callback(JPEGDRAW *pDraw) {
-  // Get the current component instance
-  if (!current_image_component) {
-    ESP_LOGE(TAG_IMAGE, "No current image component in callback");
-    return 0; // Stop decoding
-  }
-  
-  SdImageComponent *component = current_image_component;
-  
-  // Validate draw parameters
-  if (!pDraw || !pDraw->pPixels) {
-    ESP_LOGE(TAG_IMAGE, "Invalid draw parameters in callback");
+// No-resize callback for original size decoding
+int SdImageComponent::jpeg_decode_callback_no_resize(JPEGDRAW *pDraw) {
+  if (!current_image_component || !pDraw || !pDraw->pPixels) {
     return 0;
   }
   
-  // Log progress occasionally
-  static int callback_count = 0;
-  if (++callback_count % 100 == 0) {
-    ESP_LOGD(TAG_IMAGE, "JPEG callback: %d,%d %dx%d", 
-             pDraw->x, pDraw->y, pDraw->iWidth, pDraw->iHeight);
-  }
-  
-  // Process pixels - JPEGDEC provides RGB565 pixels directly
+  SdImageComponent *component = current_image_component;
   uint16_t *pixels = (uint16_t *)pDraw->pPixels;
   
+  // Direct copy without any resize logic
   for (int py = 0; py < pDraw->iHeight; py++) {
     for (int px = 0; px < pDraw->iWidth; px++) {
       int img_x = pDraw->x + px;
       int img_y = pDraw->y + py;
       
-      // Apply resize scaling if needed
-      if (component->resize_width_ > 0 && component->resize_height_ > 0) {
-        int orig_width = component->jpeg_decoder_->getWidth();
-        int orig_height = component->jpeg_decoder_->getHeight();
-        
-        if (orig_width > 0 && orig_height > 0) {
-          img_x = (img_x * component->resize_width_) / orig_width;
-          img_y = (img_y * component->resize_height_) / orig_height;
-        }
-      }
-      
-      // Bounds check
       if (img_x >= 0 && img_x < component->image_width_ && 
           img_y >= 0 && img_y < component->image_height_) {
         
-        // Get RGB565 pixel
         uint16_t rgb565 = pixels[py * pDraw->iWidth + px];
-        
-        // Store directly as RGB565 in buffer
         size_t offset = (img_y * component->image_width_ + img_x) * 2;
+        
         if (offset + 1 < component->image_buffer_.size()) {
           component->image_buffer_[offset] = rgb565 & 0xFF;
           component->image_buffer_[offset + 1] = (rgb565 >> 8) & 0xFF;
@@ -624,48 +604,543 @@ int SdImageComponent::jpeg_decode_callback(JPEGDRAW *pDraw) {
       }
     }
     
-    // Yield periodically to prevent watchdog timeout
     if (py % 16 == 0) {
       App.feed_wdt();
       yield();
     }
   }
   
-  return 1; // Continue decoding
+  return 1;
 }
 
-bool SdImageComponent::jpeg_decode_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b) {
-  // Apply resize scaling if needed
-  if (this->resize_width_ > 0 && this->resize_height_ > 0) {
-    int orig_width = this->jpeg_decoder_->getWidth();
-    int orig_height = this->jpeg_decoder_->getHeight();
-    x = (x * this->resize_width_) / orig_width;
-    y = (y * this->resize_height_) / orig_height;
+// Legacy callback with fixed resize logic (kept for compatibility)
+int SdImageComponent::jpeg_decode_callback(JPEGDRAW *pDraw) {
+  if (!current_image_component) {
+    ESP_LOGE(TAG_IMAGE, "No current image component in callback");
+    return 0;
   }
   
-  // Bounds check
-  if (x < 0 || x >= this->image_width_ || y < 0 || y >= this->image_height_) {
+  SdImageComponent *component = current_image_component;
+  
+  if (!pDraw || !pDraw->pPixels) {
+    ESP_LOGE(TAG_IMAGE, "Invalid draw parameters in callback");
+    return 0;
+  }
+  
+  // Get original JPEG dimensions
+  int orig_width = component->jpeg_decoder_->getWidth();
+  int orig_height = component->jpeg_decoder_->getHeight();
+  
+  // Check if we need to resize
+  bool need_resize = (component->resize_width_ > 0 && component->resize_height_ > 0) &&
+                    (component->resize_width_ != orig_width || component->resize_height_ != orig_height);
+  
+  uint16_t *pixels = (uint16_t *)pDraw->pPixels;
+  
+  if (need_resize) {
+    // RESIZE MODE: Sample and scale pixels
+    float scale_x = (float)orig_width / component->resize_width_;
+    float scale_y = (float)orig_height / component->resize_height_;
+    
+    // For each pixel in the resized output that falls within this draw block
+    for (int out_y = 0; out_y < component->resize_height_; out_y++) {
+      for (int out_x = 0; out_x < component->resize_width_; out_x++) {
+        // Calculate corresponding source pixel
+        int src_x = (int)(out_x * scale_x);
+        int src_y = (int)(out_y * scale_y);
+        
+        // Check if source pixel is in current draw block
+        if (src_x >= pDraw->x && src_x < (pDraw->x + pDraw->iWidth) &&
+            src_y >= pDraw->y && src_y < (pDraw->y + pDraw->iHeight)) {
+          
+          // Get pixel from draw block
+          int block_x = src_x - pDraw->x;
+          int block_y = src_y - pDraw->y;
+          uint16_t rgb565 = pixels[block_y * pDraw->iWidth + block_x];
+          
+          // Store in resized buffer
+          size_t offset = (out_y * component->resize_width_ + out_x) * 2;
+          if (offset + 1 < component->image_buffer_.size()) {
+            component->image_buffer_[offset] = rgb565 & 0xFF;
+            component->image_buffer_[offset + 1] = (rgb565 >> 8) & 0xFF;
+          }
+        }
+      }
+      
+      // Yield periodically
+      if (out_y % 16 == 0) {
+        App.feed_wdt();
+        yield();
+      }
+    }
+  } else {
+    // NO RESIZE: Direct copy
+    for (int py = 0; py < pDraw->iHeight; py++) {
+      for (int px = 0; px < pDraw->iWidth; px++) {
+        int img_x = pDraw->x + px;
+        int img_y = pDraw->y + py;
+        
+        // Bounds check
+        if (img_x >= 0 && img_x < component->image_width_ && 
+            img_y >= 0 && img_y < component->image_height_) {
+          
+          uint16_t rgb565 = pixels[py * pDraw->iWidth + px];
+          
+          size_t offset = (img_y * component->image_width_ + img_x) * 2;
+          if (offset + 1 < component->image_buffer_.size()) {
+            component->image_buffer_[offset] = rgb565 & 0xFF;
+            component->image_buffer_[offset + 1] = (rgb565 >> 8) & 0xFF;
+          }
+        }
+      }
+      
+      if (py % 16 == 0) {
+        App.feed_wdt();
+        yield();
+      }
+    }
+  }
+  
+  return 1;
+}
+
+#else // !USE_JPEGDEC
+
+bool SdImageComponent::decode_jpeg_image(const std::vector<uint8_t> &jpeg_data) {
+  ESP_LOGE(TAG_IMAGE, "JPEG support not compiled in (USE_JPEGDEC not defined)");
+  return false;
+}
+
+int SdImageComponent::jpeg_decode_callback(JPEGDRAW *pDraw) {
+  return 0;
+}
+
+int SdImageComponent::jpeg_decode_callback_no_resize(JPEGDRAW *pDraw) {
+  return 0;
+}
+
+#endif // USE_JPEGDEC
+
+// =====================================================
+// PNG Decoder Implementation
+// =====================================================
+
+#ifdef USE_PNGLE
+
+bool SdImageComponent::decode_png_image(const std::vector<uint8_t> &png_data) {
+  ESP_LOGD(TAG_IMAGE, "Using pngle PNG decoder with post-decode resize");
+  
+  current_image_component = this;
+  
+  this->png_decoder_ = pngle_new();
+  if (!this->png_decoder_) {
+    ESP_LOGE(TAG_IMAGE, "Failed to allocate PNG decoder");
+    current_image_component = nullptr;
     return false;
   }
   
-  this->set_pixel(x, y, r, g, b);
+  pngle_set_user_data(this->png_decoder_, this);
+  pngle_set_init_callback(this->png_decoder_, SdImageComponent::png_init_callback_no_resize);
+  pngle_set_draw_callback(this->png_decoder_, SdImageComponent::png_draw_callback_no_resize);
+  pngle_set_done_callback(this->png_decoder_, SdImageComponent::png_done_callback);
+  
+  // First decode at original size
+  int result = pngle_feed(this->png_decoder_, png_data.data(), png_data.size());
+  
+  if (result < 0) {
+    ESP_LOGE(TAG_IMAGE, "PNG decode error: %s", pngle_error(this->png_decoder_));
+    pngle_destroy(this->png_decoder_);
+    this->png_decoder_ = nullptr;
+    current_image_component = nullptr;
+    return false;
+  }
+  
+  // Get original dimensions
+  int orig_width = pngle_get_width(this->png_decoder_);
+  int orig_height = pngle_get_height(this->png_decoder_);
+  
+  pngle_destroy(this->png_decoder_);
+  this->png_decoder_ = nullptr;
+  current_image_component = nullptr;
+  
+  // Apply resize if needed
+  if (this->resize_width_ > 0 && this->resize_height_ > 0 &&
+      (this->resize_width_ != orig_width || this->resize_height_ != orig_height)) {
+    
+    ESP_LOGI(TAG_IMAGE, "Resizing PNG from %dx%d to %dx%d", 
+             orig_width, orig_height, this->resize_width_, this->resize_height_);
+    
+    if (!this->resize_image_buffer(orig_width, orig_height, 
+                                  this->resize_width_, this->resize_height_)) {
+      ESP_LOGE(TAG_IMAGE, "Failed to resize PNG image");
+      return false;
+    }
+    
+    this->image_width_ = this->resize_width_;
+    this->image_height_ = this->resize_height_;
+  }
+  
+  ESP_LOGI(TAG_IMAGE, "PNG processed successfully: %dx%d", 
+           this->image_width_, this->image_height_);
+  
+  return true;
+}
+
+// PNG initialization callback - no resize version
+void SdImageComponent::png_init_callback_no_resize(pngle_t *pngle, uint32_t w, uint32_t h) {
+  if (!current_image_component) {
+    ESP_LOGE(TAG_IMAGE, "No current image component in PNG init callback");
+    return;
+  }
+  
+  SdImageComponent *component = current_image_component;
+  
+  ESP_LOGI(TAG_IMAGE, "PNG init: %dx%d", w, h);
+  
+  // Validate dimensions
+  if (w <= 0 || h <= 0 || w > 2048 || h > 2048) {
+    ESP_LOGE(TAG_IMAGE, "Invalid PNG dimensions: %dx%d", w, h);
+    return;
+  }
+  
+  // Set to original dimensions for decoding
+  component->image_width_ = w;
+  component->image_height_ = h;
+  component->format_ = ImageFormat::RGB565;
+  
+  if (!component->allocate_image_buffer()) {
+    ESP_LOGE(TAG_IMAGE, "Failed to allocate PNG buffer");
+    return;
+  }
+  
+  std::fill(component->image_buffer_.begin(), component->image_buffer_.end(), 0);
+  ESP_LOGI(TAG_IMAGE, "PNG decoding at original size: %dx%d", w, h);
+}
+
+// PNG draw callback - no resize version
+void SdImageComponent::png_draw_callback_no_resize(pngle_t *pngle, uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint8_t rgba[4]) {
+  if (!current_image_component) return;
+  
+  SdImageComponent *component = current_image_component;
+  Color pixel_color(rgba[0], rgba[1], rgba[2], rgba[3]);
+  
+  // Direct pixel placement without resize
+  for (uint32_t py = 0; py < h; py++) {
+    for (uint32_t px = 0; px < w; px++) {
+      uint32_t img_x = x + px;
+      uint32_t img_y = y + py;
+      
+      if (img_x < (uint32_t)component->image_width_ && img_y < (uint32_t)component->image_height_) {
+        component->set_pixel(img_x, img_y, pixel_color.r, pixel_color.g, pixel_color.b, pixel_color.a);
+      }
+    }
+  }
+  
+  if (w * h > 100) {
+    App.feed_wdt();
+    yield();
+  }
+}
+
+// Legacy PNG callbacks with resize (kept for compatibility)
+void SdImageComponent::png_init_callback(pngle_t *pngle, uint32_t w, uint32_t h) {
+  if (!current_image_component) {
+    ESP_LOGE(TAG_IMAGE, "No current image component in PNG init callback");
+    return;
+  }
+  
+  SdImageComponent *component = current_image_component;
+  
+  ESP_LOGI(TAG_IMAGE, "PNG init: %dx%d", w, h);
+  
+  // Store original dimensions
+  int orig_width = w;
+  int orig_height = h;
+  
+  // Handle resize
+  if (component->resize_width_ > 0 && component->resize_height_ > 0) {
+    component->image_width_ = component->resize_width_;
+    component->image_height_ = component->resize_height_;
+    ESP_LOGI(TAG_IMAGE, "PNG will be resized to: %dx%d", 
+             component->image_width_, component->image_height_);
+  } else {
+    component->image_width_ = orig_width;
+    component->image_height_ = orig_height;
+  }
+  
+  // Validate dimensions
+  if (component->image_width_ <= 0 || component->image_height_ <= 0 || 
+      component->image_width_ > 2048 || component->image_height_ > 2048) {
+    ESP_LOGE(TAG_IMAGE, "Invalid PNG dimensions: %dx%d", 
+             component->image_width_, component->image_height_);
+    return;
+  }
+  
+  component->format_ = ImageFormat::RGB565;
+  
+  if (!component->allocate_image_buffer()) {
+    ESP_LOGE(TAG_IMAGE, "Failed to allocate PNG image buffer");
+    return;
+  }
+  
+  std::fill(component->image_buffer_.begin(), component->image_buffer_.end(), 0);
+  ESP_LOGI(TAG_IMAGE, "PNG buffer allocated: %zu bytes", component->image_buffer_.size());
+}
+
+void SdImageComponent::png_draw_callback(pngle_t *pngle, uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint8_t rgba[4]) {
+  if (!current_image_component) return;
+  
+  SdImageComponent *component = current_image_component;
+  
+  // Handle resize scaling
+  bool need_resize = (component->resize_width_ > 0 && component->resize_height_ > 0);
+  
+  if (need_resize) {
+    uint32_t orig_width = pngle_get_width(pngle);
+    uint32_t orig_height = pngle_get_height(pngle);
+    
+    if (orig_width > 0 && orig_height > 0) {
+      float scale_x = (float)component->image_width_ / orig_width;
+      float scale_y = (float)component->image_height_ / orig_height;
+      
+      int target_x = (int)(x * scale_x);
+      int target_y = (int)(y * scale_y);
+      int target_w = (int)(w * scale_x) + 1;
+      int target_h = (int)(h * scale_y) + 1;
+      
+      Color pixel_color(rgba[0], rgba[1], rgba[2], rgba[3]);
+      
+      for (int ty = target_y; ty < target_y + target_h && ty < component->image_height_; ty++) {
+        for (int tx = target_x; tx < target_x + target_w && tx < component->image_width_; tx++) {
+          component->set_pixel(tx, ty, pixel_color.r, pixel_color.g, pixel_color.b, pixel_color.a);
+        }
+      }
+    }
+  } else {
+    Color pixel_color(rgba[0], rgba[1], rgba[2], rgba[3]);
+    
+    for (uint32_t py = 0; py < h; py++) {
+      for (uint32_t px = 0; px < w; px++) {
+        uint32_t img_x = x + px;
+        uint32_t img_y = y + py;
+        
+        if (img_x < (uint32_t)component->image_width_ && img_y < (uint32_t)component->image_height_) {
+          component->set_pixel(img_x, img_y, pixel_color.r, pixel_color.g, pixel_color.b, pixel_color.a);
+        }
+      }
+    }
+  }
+  
+  if (w * h > 100) {
+    App.feed_wdt();
+    yield();
+  }
+}
+
+void SdImageComponent::png_done_callback(pngle_t *pngle) {
+  if (!current_image_component) return;
+  
+  ESP_LOGD(TAG_IMAGE, "PNG decoding completed");
+  
+  SdImageComponent *component = current_image_component;
+  if (component->image_buffer_.size() >= 8) {
+    ESP_LOGD(TAG_IMAGE, "First 4 pixels decoded successfully");
+    
+    if (component->format_ == ImageFormat::RGB565) {
+      uint16_t pixel1 = (component->image_buffer_[1] << 8) | component->image_buffer_[0];
+      uint8_t r = ((pixel1 >> 11) & 0x1F) << 3;
+      uint8_t g = ((pixel1 >> 5) & 0x3F) << 2;
+      uint8_t b = (pixel1 & 0x1F) << 3;
+      ESP_LOGD(TAG_IMAGE, "First pixel RGB565: 0x%04X -> RGB(%d,%d,%d)", pixel1, r, g, b);
+    }
+  }
+}
+
+#else // !USE_PNGLE
+
+bool SdImageComponent::decode_png_image(const std::vector<uint8_t> &png_data) {
+  ESP_LOGE(TAG_IMAGE, "PNG support not compiled in (USE_PNGLE not defined)");
+  return false;
+}
+
+void SdImageComponent::png_init_callback(pngle_t *pngle, uint32_t w, uint32_t h) {}
+void SdImageComponent::png_draw_callback(pngle_t *pngle, uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint8_t rgba[4]) {}
+void SdImageComponent::png_done_callback(pngle_t *pngle) {}
+void SdImageComponent::png_init_callback_no_resize(pngle_t *pngle, uint32_t w, uint32_t h) {}
+void SdImageComponent::png_draw_callback_no_resize(pngle_t *pngle, uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint8_t rgba[4]) {}
+
+#endif // USE_PNGLE
+
+// =====================================================
+// Resize Methods Implementation
+// =====================================================
+
+bool SdImageComponent::resize_image_buffer(int src_width, int src_height, int dst_width, int dst_height) {
+  if (this->image_buffer_.empty()) {
+    ESP_LOGE(TAG_IMAGE, "Source buffer is empty");
+    return false;
+  }
+  
+  if (dst_width <= 0 || dst_height <= 0 || dst_width > 2048 || dst_height > 2048) {
+    ESP_LOGE(TAG_IMAGE, "Invalid resize dimensions: %dx%d", dst_width, dst_height);
+    return false;
+  }
+  
+  // Create new buffer for resized image
+  std::vector<uint8_t> new_buffer(dst_width * dst_height * 2); // RGB565
+  
+  // Simple nearest-neighbor resize
+  float scale_x = (float)src_width / dst_width;
+  float scale_y = (float)src_height / dst_height;
+  
+  ESP_LOGI(TAG_IMAGE, "Resizing %dx%d -> %dx%d (scale: %.3f, %.3f)", 
+           src_width, src_height, dst_width, dst_height, scale_x, scale_y);
+  
+  for (int dst_y = 0; dst_y < dst_height; dst_y++) {
+    for (int dst_x = 0; dst_x < dst_width; dst_x++) {
+      
+      // Find corresponding source pixel
+      int src_x = (int)(dst_x * scale_x);
+      int src_y = (int)(dst_y * scale_y);
+      
+      // Clamp to source bounds
+      if (src_x >= src_width) src_x = src_width - 1;
+      if (src_y >= src_height) src_y = src_height - 1;
+      
+      // Copy pixel
+      size_t src_offset = (src_y * src_width + src_x) * 2;
+      size_t dst_offset = (dst_y * dst_width + dst_x) * 2;
+      
+      if (src_offset + 1 < this->image_buffer_.size() && 
+          dst_offset + 1 < new_buffer.size()) {
+        new_buffer[dst_offset] = this->image_buffer_[src_offset];
+        new_buffer[dst_offset + 1] = this->image_buffer_[src_offset + 1];
+      }
+    }
+    
+    // Yield periodically
+    if (dst_y % 32 == 0) {
+      App.feed_wdt();
+      yield();
+    }
+  }
+  
+  // Replace buffer
+  this->image_buffer_ = std::move(new_buffer);
+  
+  ESP_LOGI(TAG_IMAGE, "Image resized successfully from %dx%d to %dx%d", 
+           src_width, src_height, dst_width, dst_height);
+  
+  return true;
+}
+
+bool SdImageComponent::resize_image_buffer_bilinear(int src_width, int src_height, int dst_width, int dst_height) {
+  if (this->image_buffer_.empty()) {
+    ESP_LOGE(TAG_IMAGE, "Source buffer is empty");
+    return false;
+  }
+  
+  if (dst_width <= 0 || dst_height <= 0 || dst_width > 2048 || dst_height > 2048) {
+    ESP_LOGE(TAG_IMAGE, "Invalid resize dimensions: %dx%d", dst_width, dst_height);
+    return false;
+  }
+  
+  std::vector<uint8_t> new_buffer(dst_width * dst_height * 2);
+  
+  float scale_x = (float)(src_width - 1) / (dst_width - 1);
+  float scale_y = (float)(src_height - 1) / (dst_height - 1);
+  
+  ESP_LOGI(TAG_IMAGE, "Bilinear resizing %dx%d -> %dx%d", src_width, src_height, dst_width, dst_height);
+  
+  for (int dst_y = 0; dst_y < dst_height; dst_y++) {
+    for (int dst_x = 0; dst_x < dst_width; dst_x++) {
+      
+      float src_x_f = dst_x * scale_x;
+      float src_y_f = dst_y * scale_y;
+      
+      int src_x0 = (int)src_x_f;
+      int src_y0 = (int)src_y_f;
+      int src_x1 = std::min(src_x0 + 1, src_width - 1);
+      int src_y1 = std::min(src_y0 + 1, src_height - 1);
+      
+      float dx = src_x_f - src_x0;
+      float dy = src_y_f - src_y0;
+      
+      // Get 4 surrounding pixels
+      auto get_pixel = [&](int x, int y) -> uint16_t {
+        size_t offset = (y * src_width + x) * 2;
+        if (offset + 1 < this->image_buffer_.size()) {
+          return this->image_buffer_[offset] | (this->image_buffer_[offset + 1] << 8);
+        }
+        return 0;
+      };
+      
+      uint16_t p00 = get_pixel(src_x0, src_y0);
+      uint16_t p01 = get_pixel(src_x0, src_y1);
+      uint16_t p10 = get_pixel(src_x1, src_y0);
+      uint16_t p11 = get_pixel(src_x1, src_y1);
+      
+      // Interpolate RGB components separately
+      auto interpolate_rgb565 = [](uint16_t p00, uint16_t p01, uint16_t p10, uint16_t p11, 
+                                  float dx, float dy) -> uint16_t {
+        // Extract RGB components
+        uint8_t r00 = (p00 >> 11) & 0x1F, g00 = (p00 >> 5) & 0x3F, b00 = p00 & 0x1F;
+        uint8_t r01 = (p01 >> 11) & 0x1F, g01 = (p01 >> 5) & 0x3F, b01 = p01 & 0x1F;
+        uint8_t r10 = (p10 >> 11) & 0x1F, g10 = (p10 >> 5) & 0x3F, b10 = p10 & 0x1F;
+        uint8_t r11 = (p11 >> 11) & 0x1F, g11 = (p11 >> 5) & 0x3F, b11 = p11 & 0x1F;
+        
+        // Bilinear interpolation
+        float r = r00 * (1-dx) * (1-dy) + r10 * dx * (1-dy) + r01 * (1-dx) * dy + r11 * dx * dy;
+        float g = g00 * (1-dx) * (1-dy) + g10 * dx * (1-dy) + g01 * (1-dx) * dy + g11 * dx * dy;
+        float b = b00 * (1-dx) * (1-dy) + b10 * dx * (1-dy) + b01 * (1-dx) * dy + b11 * dx * dy;
+        
+        return ((uint16_t)r << 11) | ((uint16_t)g << 5) | (uint16_t)b;
+      };
+      
+      uint16_t result = interpolate_rgb565(p00, p01, p10, p11, dx, dy);
+      
+      size_t dst_offset = (dst_y * dst_width + dst_x) * 2;
+      if (dst_offset + 1 < new_buffer.size()) {
+        new_buffer[dst_offset] = result & 0xFF;
+        new_buffer[dst_offset + 1] = (result >> 8) & 0xFF;
+      }
+    }
+    
+    if (dst_y % 16 == 0) {
+      App.feed_wdt();
+      yield();
+    }
+  }
+  
+  this->image_buffer_ = std::move(new_buffer);
+  
+  ESP_LOGI(TAG_IMAGE, "Image resized with bilinear interpolation from %dx%d to %dx%d", 
+           src_width, src_height, dst_width, dst_height);
+  
   return true;
 }
 
 // =====================================================
-// Helper Methods
+// Helper Methods Implementation
 // =====================================================
 
 bool SdImageComponent::allocate_image_buffer() {
   size_t buffer_size = this->get_buffer_size();
   
-  if (buffer_size == 0 || buffer_size > 3 * 1024 * 1024) { // 3MB limit for ESP32P4
+  if (buffer_size == 0 || buffer_size > 16 * 1024 * 1024) { // 16MB limit for ESP32S3
     ESP_LOGE(TAG_IMAGE, "Invalid buffer size: %zu bytes", buffer_size);
     return false;
   }
   
   this->image_buffer_.clear();
-  this->image_buffer_.resize(buffer_size, 0);
+  
+  try {
+    this->image_buffer_.resize(buffer_size, 0);
+  } catch (const std::bad_alloc& e) {
+    ESP_LOGE(TAG_IMAGE, "Failed to allocate %zu bytes for image buffer", buffer_size);
+    return false;
+  }
+  
   ESP_LOGD(TAG_IMAGE, "Allocated image buffer: %zu bytes", buffer_size);
   return true;
 }
@@ -757,10 +1232,10 @@ void SdImageComponent::list_directory_contents(const std::string &dir_path) {
     struct stat st;
     if (stat(full_path.c_str(), &st) == 0) {
       if (S_ISREG(st.st_mode)) {
-        ESP_LOGI(TAG_IMAGE, "  📄 %s (%ld bytes)", entry->d_name, (long)st.st_size);
+        ESP_LOGI(TAG_IMAGE, "  File: %s (%ld bytes)", entry->d_name, (long)st.st_size);
         file_count++;
       } else if (S_ISDIR(st.st_mode)) {
-        ESP_LOGI(TAG_IMAGE, "  📁 %s/", entry->d_name);
+        ESP_LOGI(TAG_IMAGE, "  Dir: %s/", entry->d_name);
       }
     }
   }
@@ -783,6 +1258,26 @@ bool SdImageComponent::extract_jpeg_dimensions(const std::vector<uint8_t> &data,
     }
   }
   return false;
+}
+
+bool SdImageComponent::jpeg_decode_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b) {
+  // Apply resize scaling if needed
+  if (this->resize_width_ > 0 && this->resize_height_ > 0) {
+    int orig_width = this->jpeg_decoder_->getWidth();
+    int orig_height = this->jpeg_decoder_->getHeight();
+    if (orig_width > 0 && orig_height > 0) {
+      x = (x * this->resize_width_) / orig_width;
+      y = (y * this->resize_height_) / orig_height;
+    }
+  }
+  
+  // Bounds check
+  if (x < 0 || x >= this->image_width_ || y < 0 || y >= this->image_height_) {
+    return false;
+  }
+  
+  this->set_pixel(x, y, r, g, b);
+  return true;
 }
 
 }  // namespace storage
