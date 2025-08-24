@@ -15,6 +15,8 @@
 #include "driver/sdmmc_host.h"
 #include "driver/sdmmc_types.h"
 #include "sd_pwr_ctrl_by_on_chip_ldo.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 int constexpr SD_OCR_SDHC_CAP = (1 << 30);  // value defined in esp-idf/components/sdmmc/include/sd_protocol_defs.h
 #endif
@@ -86,7 +88,7 @@ void SdMmc::power_on() {
     this->power_ctrl_pin_->digital_write(true);
     this->power_enabled_ = true;
     ESP_LOGI(TAG, "SD Card power ON");
-    delay(150);  // Délai pour la stabilisation de l'alimentation
+    vTaskDelay(pdMS_TO_TICKS(150));  // Délai pour la stabilisation de l'alimentation
   }
 }
 
@@ -95,14 +97,14 @@ void SdMmc::power_off() {
     this->power_ctrl_pin_->digital_write(false);
     this->power_enabled_ = false;
     ESP_LOGI(TAG, "SD Card power OFF");
-    delay(50);  // Petit délai pour s'assurer que l'alimentation est coupée
+    vTaskDelay(pdMS_TO_TICKS(50));  // Petit délai pour s'assurer que l'alimentation est coupée
   }
 }
 
 void SdMmc::power_cycle() {
   ESP_LOGI(TAG, "Power cycling SD Card...");
   power_off();
-  delay(500);  // Délai pour décharge complète
+  vTaskDelay(pdMS_TO_TICKS(500));  // Délai pour décharge complète
   power_on();
 }
 
