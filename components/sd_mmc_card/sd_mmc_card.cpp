@@ -92,7 +92,7 @@ void SdMmc::power_on() {
     this->power_enabled_ = true;
     ESP_LOGI(TAG, "SD Card power ON (level: %s, inverted: %s)", 
              ONOFF(level), TRUEFALSE(this->power_ctrl_inverted_));
-    vTaskDelay(pdMS_TO_TICKS(150));  // Délai pour la stabilisation de l'alimentation
+    vTaskDelay(pdMS_TO_TICKS(300));  // Délai plus long pour la stabilisation de l'alimentation
   }
 }
 
@@ -162,6 +162,7 @@ void SdMmc::setup() {
   
   // Configuration des pins seulement si on utilise GPIO matrix
   #ifdef SOC_SDMMC_USE_GPIO_MATRIX
+  ESP_LOGI(TAG, "Using GPIO matrix for SDMMC pins");
   slot_config.clk = static_cast<gpio_num_t>(this->clk_pin_);
   slot_config.cmd = static_cast<gpio_num_t>(this->cmd_pin_);
   slot_config.d0 = static_cast<gpio_num_t>(this->data0_pin_);
@@ -170,6 +171,8 @@ void SdMmc::setup() {
     slot_config.d2 = static_cast<gpio_num_t>(this->data2_pin_);
     slot_config.d3 = static_cast<gpio_num_t>(this->data3_pin_);
   }
+  #else
+  ESP_LOGI(TAG, "Using dedicated SDMMC pins (GPIO matrix not available)");
   #endif
   
   // Enable internal pullups
