@@ -228,7 +228,6 @@ void SdMmc::setup() {
   
   update_sensors();
 }
-}
 
 void SdMmc::write_file_chunked(const char *path, const uint8_t *buffer, size_t len, size_t chunk_size) {
   std::string absolut_path = build_path(path);
