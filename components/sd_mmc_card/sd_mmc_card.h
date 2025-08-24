@@ -88,6 +88,7 @@ class SdMmc : public Component {
   void set_data3_pin(uint8_t);
   void set_mode_1bit(bool);
   void set_power_ctrl_pin(GPIOPin *);
+  void set_power_ctrl_inverted(bool inverted) { this->power_ctrl_inverted_ = inverted; }  // Ajout de la méthode
   void set_slot(uint8_t slot) { this->slot_ = slot; }
 
   // Nouvelles méthodes pour le contrôle d'alimentation
@@ -106,6 +107,7 @@ class SdMmc : public Component {
   uint8_t data3_pin_;
   bool mode_1bit_;
   GPIOPin *power_ctrl_pin_{nullptr};
+  bool power_ctrl_inverted_{false};  // Ajout du flag d'inversion
   bool power_enabled_{false};  // État de l'alimentation
 
   uint8_t slot_ = 0;  // Par défaut slot 0
@@ -235,7 +237,7 @@ template<typename... Ts> class SdMmcReadFileChunkedAction : public Action<Ts...>
   SdMmc *parent_;
 };
 
-// Nouvelle action pour contrôler l'alimentation
+// Action pour contrôler l'alimentation
 template<typename... Ts> class SdMmcPowerControlAction : public Action<Ts...> {
  public:
   SdMmcPowerControlAction(SdMmc *parent) : parent_(parent) {}
