@@ -51,6 +51,7 @@ void SdMmc::dump_config() {
   }
   if (this->power_ctrl_pin_ != nullptr) {
     LOG_PIN("  Power Ctrl Pin: ", this->power_ctrl_pin_);
+    ESP_LOGCONFIG(TAG, "  Power State: %s", ONOFF(this->power_enabled_));
   }
 
   if (!this->is_failed()) {
@@ -78,12 +79,51 @@ void SdMmc::dump_config() {
     return;
   }
 }
+
+// Nouvelles méthodes pour le contrôle d'alimentation
+void SdMmc::power_on() {
+  if (this->power_ctrl_pin_ != nullptr) {
+    this->power_ctrl_pin_->digital_write(true);
+    this->power_enabled_ = true;
+    ESP_LOGI(TAG, "SD Card power ON");
+    delay(150);  // Délai pour la stabilisation de l'alimentation
+  }
+}
+
+void SdMmc::power_off() {
+  if (this->power_ctrl_pin_ != nullptr) {
+    this->power_ctrl_pin_->digital_write(false);
+    this->power_enabled_ = false;
+    ESP_LOGI(TAG, "SD Card power OFF");
+    delay(50);  // Petit délai pour s'assurer que l'alimentation est coupée
+  }
+}
+
+void SdMmc::power_cycle() {
+  ESP_LOGI(TAG, "Power cycling SD Card...");
+  power_off();
+  delay(500);  // Délai pour décharge complète
+  power_on();
+}
+
+bool SdMmc::is_card_present() {
+#ifdef USE_ESP_IDF
+  return (this->card_ != nullptr && !this->is_failed());
+#else
+  return false;
+#endif
+}
+
 #ifdef USE_ESP_IDF
 
 void SdMmc::setup() {
-  // Power control
+  ESP_LOGI(TAG, "Setting up SD MMC Card...");
+  
+  // Configuration et activation de l'alimentation EN PREMIER
   if (this->power_ctrl_pin_ != nullptr) {
     this->power_ctrl_pin_->setup();
+    ESP_LOGI(TAG, "Configuring power control pin");
+    power_on();  // Active l'alimentation avec les bons délais
   }
   
   // Configuration optimale
@@ -138,15 +178,22 @@ void SdMmc::setup() {
   
   // Try to mount with optimized retry logic
   esp_err_t ret = ESP_FAIL;
-  for (int attempt = 1; attempt <= 3; attempt++) {
-    ESP_LOGI(TAG, "Mounting SD Card on slot %d (attempt %d/3)...", this->slot_, attempt);
+  for (int attempt = 1; attempt <= 5; attempt++) {  // Plus de tentatives
+    ESP_LOGI(TAG, "Mounting SD Card on slot %d (attempt %d/5)...", this->slot_, attempt);
     ret = esp_vfs_fat_sdmmc_mount(MOUNT_POINT.c_str(), &host, &slot_config, &mount_config, &this->card_);
     if (ret == ESP_OK) {
       ESP_LOGI(TAG, "SD Card mounted successfully on slot %d!", this->slot_);
       break;
     }
     ESP_LOGW(TAG, "Mount attempt %d failed: %s", attempt, esp_err_to_name(ret));
-    vTaskDelay(pdMS_TO_TICKS(100));  // Pause entre tentatives
+    
+    // Cycle d'alimentation après les 2 premiers échecs si power_ctrl_pin disponible
+    if (attempt == 2 && this->power_ctrl_pin_ != nullptr) {
+      ESP_LOGI(TAG, "Trying power cycle...");
+      power_cycle();
+    }
+    
+    vTaskDelay(pdMS_TO_TICKS(200));  // Pause plus longue entre tentatives
   }
   
   if (ret != ESP_OK) {
@@ -198,6 +245,28 @@ void SdMmc::write_file_chunked(const char *path, const uint8_t *buffer, size_t l
   fclose(file);
   this->update_sensors();
 }
+
+void SdMmc::write_file(const char *path, const uint8_t *buffer, size_t len) {
+  write_file(path, buffer, len, "w");
+}
+
+void SdMmc::write_file(const char *path, const uint8_t *buffer, size_t len, const char *mode) {
+  ESP_LOGV(TAG, "Writing file: %s", path);
+  std::string absolut_path = build_path(path);
+  FILE *file = fopen(absolut_path.c_str(), mode);
+  if (file == nullptr) {
+    ESP_LOGE(TAG, "Failed to open file for writing");
+    return;
+  }
+  fwrite(buffer, 1, len, file);
+  fclose(file);
+  this->update_sensors();
+}
+
+void SdMmc::append_file(const char *path, const uint8_t *buffer, size_t len) {
+  write_file(path, buffer, len, "a");
+}
+
 #else
 void SdMmc::write_file_chunked(const char *path, const uint8_t *buffer, size_t len, size_t chunk_size) {
   ESP_LOGV(TAG, "Writing chunked to file: %s", path);
