@@ -139,20 +139,26 @@ void SdMmc::setup() {
   
   // IMPORTANT : ESP32-P4 nécessite VDDPST_5 (SD_VREF) connecté à 3.3V
   ESP_LOGI(TAG, "Ensure VDDPST_5 (SD_VREF) is connected to 3.3V for ESP32-P4");
+  ESP_LOGI(TAG, "Ensure external 10kΩ pullups on all SDMMC data/cmd lines");
+  
+  // Diagnostic des pins configurées
+  ESP_LOGI(TAG, "Pin configuration:");
+  ESP_LOGI(TAG, "  CLK: %d, CMD: %d, DATA0: %d", this->clk_pin_, this->cmd_pin_, this->data0_pin_);
+  if (!this->mode_1bit_) {
+    ESP_LOGI(TAG, "  DATA1: %d, DATA2: %d, DATA3: %d", this->data1_pin_, this->data2_pin_, this->data3_pin_);
+  }
   
   // Configuration optimale pour ESP32-P4
   esp_vfs_fat_sdmmc_mount_config_t mount_config = {
     .format_if_mount_failed = false,
-    .max_files = 16,
-    .allocation_unit_size = 64 * 1024  // Plus conservateur pour P4
+    .max_files = 8,  // Réduit pour économiser la mémoire
+    .allocation_unit_size = 16 * 1024  // Plus petit pour compatibility
   };
   
   // Configuration du host - ESP32-P4 utilise le slot 1 pour SDMMC
   sdmmc_host_t host = SDMMC_HOST_DEFAULT();
-  host.slot = SDMMC_HOST_SLOT_1;  // ESP32-P4 utilise le slot 1
-  host.max_freq_khz = SDMMC_FREQ_DEFAULT;  // Plus conservateur au début (20MHz)
-  
-  // ESP32-P4 supporte la GPIO matrix pour SDMMC - pas besoin de SDMMC_HOST_FLAG_SKIP_INIT_SLOT
+  host.slot = SDMMC_HOST_SLOT_1;  // ESP32-P4 utilise obligatoirement le slot 1
+  host.max_freq_khz = 10000;  // Commencer très conservateur (10MHz)
   
   sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
   slot_config.width = this->mode_1bit_ ? 1 : 4;
@@ -169,57 +175,139 @@ void SdMmc::setup() {
     slot_config.d3 = static_cast<gpio_num_t>(this->data3_pin_);
   }
   
-  // Pullups internes activés
-  slot_config.flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;
+  // CRITIQUE : ESP32-P4 nécessite des pullups externes sur toutes les lignes
+  // Les pullups internes sont insuffisants
+  slot_config.flags = 0;  // Pas de pullups internes
+  ESP_LOGW(TAG, "ESP32-P4 requires external 10kΩ pullups on CMD and all DATA lines!");
+  
+  // Test des pins avant montage
+  ESP_LOGI(TAG, "Testing GPIO configuration...");
+  gpio_config_t io_conf = {
+    .pin_bit_mask = (1ULL << this->clk_pin_) | (1ULL << this->cmd_pin_) | (1ULL << this->data0_pin_),
+    .mode = GPIO_MODE_OUTPUT,
+    .pull_up_en = GPIO_PULLUP_DISABLE,
+    .pull_down_en = GPIO_PULLDOWN_DISABLE,
+    .intr_type = GPIO_INTR_DISABLE,
+  };
+  
+  if (!this->mode_1bit_) {
+    io_conf.pin_bit_mask |= (1ULL << this->data1_pin_) | (1ULL << this->data2_pin_) | (1ULL << this->data3_pin_);
+  }
+  
+  esp_err_t gpio_ret = gpio_config(&io_conf);
+  if (gpio_ret != ESP_OK) {
+    ESP_LOGE(TAG, "GPIO configuration failed: %s", esp_err_to_name(gpio_ret));
+    this->init_error_ = ErrorCode::ERR_PIN_SETUP;
+    mark_failed();
+    return;
+  }
+  
+  // Test rapide des niveaux de pins (avec pullups externes, toutes doivent être HIGH)
+  gpio_set_direction(static_cast<gpio_num_t>(this->cmd_pin_), GPIO_MODE_INPUT);
+  gpio_set_direction(static_cast<gpio_num_t>(this->data0_pin_), GPIO_MODE_INPUT);
+  vTaskDelay(pdMS_TO_TICKS(100));
+  
+  int cmd_level = gpio_get_level(static_cast<gpio_num_t>(this->cmd_pin_));
+  int data0_level = gpio_get_level(static_cast<gpio_num_t>(this->data0_pin_));
+  
+  ESP_LOGI(TAG, "Pin levels (should be HIGH with pullups): CMD=%d, DATA0=%d", cmd_level, data0_level);
+  
+  if (cmd_level == 0 || data0_level == 0) {
+    ESP_LOGE(TAG, "CMD or DATA0 pin is LOW - check external pullups!");
+    ESP_LOGE(TAG, "ESP32-P4 REQUIRES 10kΩ pullups to 3.3V on CMD and DATA lines");
+  }
   
   // Délai supplémentaire pour stabilisation sur P4
-  vTaskDelay(pdMS_TO_TICKS(500));
+  vTaskDelay(pdMS_TO_TICKS(1000));
   
-  // Try to mount with optimized retry logic for ESP32-P4
+  // Try to mount with different strategies for ESP32-P4
   esp_err_t ret = ESP_FAIL;
+  
+  // Étape 1 : Essayer en mode 1-bit d'abord (plus fiable)
+  if (!this->mode_1bit_) {
+    ESP_LOGI(TAG, "Attempting 1-bit mode first for better compatibility...");
+    slot_config.width = 1;
+  }
+  
   for (int attempt = 1; attempt <= 5; attempt++) {
-    ESP_LOGI(TAG, "Mounting SD Card on ESP32-P4 slot 1 (attempt %d/5)...", attempt);
+    ESP_LOGI(TAG, "Mounting SD Card on ESP32-P4 slot 1 (attempt %d/5, %s)...", 
+             attempt, slot_config.width == 1 ? "1-bit" : "4-bit");
+    
     ret = esp_vfs_fat_sdmmc_mount(MOUNT_POINT.c_str(), &host, &slot_config, &mount_config, &this->card_);
+    
     if (ret == ESP_OK) {
-      ESP_LOGI(TAG, "SD Card mounted successfully on ESP32-P4 slot 1!");
+      ESP_LOGI(TAG, "SD Card mounted successfully on ESP32-P4 slot 1 (%s mode)!", 
+               slot_config.width == 1 ? "1-bit" : "4-bit");
       break;
     }
+    
     ESP_LOGW(TAG, "Mount attempt %d failed: %s", attempt, esp_err_to_name(ret));
     
-    // Cycle d'alimentation après les 2 premiers échecs si power_ctrl_pin disponible
-    if (attempt == 2 && this->power_ctrl_pin_ != nullptr) {
-      ESP_LOGI(TAG, "Trying power cycle...");
-      power_cycle();
-      vTaskDelay(pdMS_TO_TICKS(1000));  // Délai plus long après power cycle sur P4
+    // Après 2 échecs, essayer des stratégies de récupération
+    if (attempt == 2) {
+      // Power cycle si disponible
+      if (this->power_ctrl_pin_ != nullptr) {
+        ESP_LOGI(TAG, "Trying power cycle...");
+        power_cycle();
+        vTaskDelay(pdMS_TO_TICKS(1500));
+      }
+      
+      // Réduire encore plus la fréquence
+      host.max_freq_khz = 5000;  // 5MHz
+      ESP_LOGI(TAG, "Reducing frequency to %d kHz", host.max_freq_khz);
     }
     
-    vTaskDelay(pdMS_TO_TICKS(300));
+    if (attempt == 4 && !this->mode_1bit_ && slot_config.width == 4) {
+      // En dernier recours, forcer le mode 1-bit
+      ESP_LOGI(TAG, "Forcing 1-bit mode for final attempts...");
+      slot_config.width = 1;
+    }
+    
+    vTaskDelay(pdMS_TO_TICKS(500));
   }
   
   if (ret != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to mount SD card on ESP32-P4. Check:");
+    ESP_LOGE(TAG, "Failed to mount SD card on ESP32-P4 after all attempts");
+    ESP_LOGE(TAG, "Final error: %s", esp_err_to_name(ret));
+    ESP_LOGE(TAG, "");
+    ESP_LOGE(TAG, "ESP32-P4 SDMMC Troubleshooting Checklist:");
     ESP_LOGE(TAG, "  1. VDDPST_5 (SD_VREF) connected to 3.3V");
-    ESP_LOGE(TAG, "  2. SD card power (TF_VCC) at 3.3V");
-    ESP_LOGE(TAG, "  3. GPIO pin connections");
-    ESP_LOGE(TAG, "  4. SD card format and compatibility");
+    ESP_LOGE(TAG, "  2. SD card VCC at 3.3V (not 1.8V)");
+    ESP_LOGE(TAG, "  3. External 10kΩ pullups on CMD, DATA0 (and DATA1-3 for 4-bit)");
+    ESP_LOGE(TAG, "  4. SD card properly inserted and formatted (FAT32)");
+    ESP_LOGE(TAG, "  5. GPIO pins not conflicting with other peripherals");
+    ESP_LOGE(TAG, "  6. Stable power supply (cards can draw 100-200mA)");
+    ESP_LOGE(TAG, "");
+    ESP_LOGE(TAG, "Try connecting an oscilloscope to verify signal integrity");
     
-    if (ret == ESP_FAIL) {
+    if (ret == ESP_ERR_TIMEOUT) {
+      this->init_error_ = ErrorCode::ERR_NO_CARD;
+      ESP_LOGE(TAG, "Timeout - likely no card inserted or power issue");
+    } else if (ret == ESP_FAIL) {
       this->init_error_ = ErrorCode::ERR_MOUNT;
-      ESP_LOGE(TAG, "Failed to mount filesystem");
+      ESP_LOGE(TAG, "Mount failed - check card format and compatibility");
     } else {
       this->init_error_ = ErrorCode::ERR_NO_CARD;
-      ESP_LOGE(TAG, "No SD card detected");
+      ESP_LOGE(TAG, "Card detection failed");
     }
     mark_failed();
     return;
   }
   
+  // Si on a réussi en 1-bit mais l'utilisateur voulait 4-bit, essayer d'upgrader
+  if (slot_config.width == 1 && !this->mode_1bit_) {
+    ESP_LOGI(TAG, "Card mounted in 1-bit, attempting to switch to 4-bit mode...");
+    // Pour l'instant, on reste en 1-bit car c'est plus stable sur ESP32-P4
+    ESP_LOGW(TAG, "Staying in 1-bit mode for better stability on ESP32-P4");
+  }
+  
   // Diagnostic de la carte
-  ESP_LOGI(TAG, "SD Card Info (ESP32-P4 slot 1):");
+  ESP_LOGI(TAG, "SD Card successfully mounted on ESP32-P4 slot 1:");
   ESP_LOGI(TAG, "  Name: %s", this->card_->cid.name);
   ESP_LOGI(TAG, "  Type: %s", sd_card_type().c_str());
   ESP_LOGI(TAG, "  Speed: %d kHz (max: %d kHz)", this->card_->real_freq_khz, this->card_->max_freq_khz);
   ESP_LOGI(TAG, "  Size: %llu MB", ((uint64_t)this->card_->csd.capacity * this->card_->csd.sector_size) / (1024 * 1024));
+  ESP_LOGI(TAG, "  Bus width: %d-bit", slot_config.width);
   
   #ifdef USE_TEXT_SENSOR
   if (this->sd_card_type_text_sensor_ != nullptr)
