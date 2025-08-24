@@ -126,75 +126,73 @@ bool SdMmc::is_card_present() {
 #ifdef USE_ESP_IDF
 
 void SdMmc::setup() {
-  ESP_LOGI(TAG, "Setting up SD MMC Card...");
+  ESP_LOGI(TAG, "Setting up SD MMC Card on ESP32-P4...");
   
   // Configuration et activation de l'alimentation EN PREMIER
   if (this->power_ctrl_pin_ != nullptr) {
     this->power_ctrl_pin_->setup();
     ESP_LOGI(TAG, "Configuring power control pin");
     power_on();  // Active l'alimentation avec les bons délais
+  } else {
+    ESP_LOGW(TAG, "No power control pin configured - ensure SD card is always powered");
   }
   
-  // Configuration optimale
+  // IMPORTANT : ESP32-P4 nécessite VDDPST_5 (SD_VREF) connecté à 3.3V
+  ESP_LOGI(TAG, "Ensure VDDPST_5 (SD_VREF) is connected to 3.3V for ESP32-P4");
+  
+  // Configuration optimale pour ESP32-P4
   esp_vfs_fat_sdmmc_mount_config_t mount_config = {
     .format_if_mount_failed = false,
     .max_files = 16,
-    .allocation_unit_size = 256 * 1024  // 256KB optimise l'écriture des fichiers
+    .allocation_unit_size = 64 * 1024  // Plus conservateur pour P4
   };
   
-  // Configuration du host avec le slot spécifié
+  // Configuration du host - ESP32-P4 utilise toujours le slot 1 pour SDMMC
   sdmmc_host_t host = SDMMC_HOST_DEFAULT();
-  host.slot = SDMMC_HOST_SLOT_0 + this->slot_;  // Utilise le slot configuré
-  host.max_freq_khz = SDMMC_FREQ_HIGHSPEED;  // 50MHz
+  host.slot = SDMMC_HOST_SLOT_1;  // ESP32-P4 utilise obligatoirement slot 1
+  host.max_freq_khz = SDMMC_FREQ_DEFAULT;  // Plus conservateur au début (20MHz)
   
-  // Dans les versions récentes d'ESP-IDF, DMA est généralement activé par défaut
-  // ou configuré différemment, donc on n'ajoute pas SDMMC_HOST_FLAG_DMA
-  
-  // Activer DDR seulement en mode 4 bits
-  if (!this->mode_1bit_) {
-    host.flags |= SDMMC_HOST_FLAG_DDR;
-  } else {
-    host.flags &= ~SDMMC_HOST_FLAG_DDR;
-  }
+  // ESP32-P4 supporte la GPIO matrix pour SDMMC
+  host.flags |= SDMMC_HOST_FLAG_SKIP_INIT_SLOT;  // On initialise nous-mêmes le slot
   
   sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
   slot_config.width = this->mode_1bit_ ? 1 : 4;
   
-  // Configuration des pins seulement si on utilise GPIO matrix
-  #ifdef SOC_SDMMC_USE_GPIO_MATRIX
-  ESP_LOGI(TAG, "Using GPIO matrix for SDMMC pins");
+  // Configuration des pins GPIO via GPIO matrix (ESP32-P4 spécifique)
+  ESP_LOGI(TAG, "Configuring GPIO matrix for SDMMC on ESP32-P4");
   slot_config.clk = static_cast<gpio_num_t>(this->clk_pin_);
   slot_config.cmd = static_cast<gpio_num_t>(this->cmd_pin_);
   slot_config.d0 = static_cast<gpio_num_t>(this->data0_pin_);
+  
   if (!this->mode_1bit_) {
     slot_config.d1 = static_cast<gpio_num_t>(this->data1_pin_);
     slot_config.d2 = static_cast<gpio_num_t>(this->data2_pin_);
     slot_config.d3 = static_cast<gpio_num_t>(this->data3_pin_);
   }
-  #else
-  ESP_LOGI(TAG, "Using dedicated SDMMC pins (GPIO matrix not available)");
-  #endif
   
-  // Enable internal pullups
+  // Pullups internes activés
   slot_config.flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;
   
-  // Initialiser le slot spécifique avant le montage
-  ESP_LOGI(TAG, "Initializing SDMMC slot %d", this->slot_);
-  esp_err_t slot_init = sdmmc_host_init_slot(host.slot, &slot_config);
+  // Initialiser le slot SDMMC_HOST_SLOT_1 pour ESP32-P4
+  ESP_LOGI(TAG, "Initializing SDMMC slot 1 for ESP32-P4");
+  esp_err_t slot_init = sdmmc_host_init_slot(SDMMC_HOST_SLOT_1, &slot_config);
   if (slot_init != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to initialize slot %d: %s", this->slot_, esp_err_to_name(slot_init));
+    ESP_LOGE(TAG, "Failed to initialize slot 1: %s", esp_err_to_name(slot_init));
     this->init_error_ = ErrorCode::ERR_PIN_SETUP;
     mark_failed();
     return;
   }
   
-  // Try to mount with optimized retry logic
+  // Délai supplémentaire pour stabilisation sur P4
+  vTaskDelay(pdMS_TO_TICKS(500));
+  
+  // Try to mount with optimized retry logic for ESP32-P4
   esp_err_t ret = ESP_FAIL;
-  for (int attempt = 1; attempt <= 5; attempt++) {  // Plus de tentatives
-    ESP_LOGI(TAG, "Mounting SD Card on slot %d (attempt %d/5)...", this->slot_, attempt);
+  for (int attempt = 1; attempt <= 5; attempt++) {
+    ESP_LOGI(TAG, "Mounting SD Card on ESP32-P4 slot 1 (attempt %d/5)...", attempt);
     ret = esp_vfs_fat_sdmmc_mount(MOUNT_POINT.c_str(), &host, &slot_config, &mount_config, &this->card_);
     if (ret == ESP_OK) {
-      ESP_LOGI(TAG, "SD Card mounted successfully on slot %d!", this->slot_);
+      ESP_LOGI(TAG, "SD Card mounted successfully on ESP32-P4 slot 1!");
       break;
     }
     ESP_LOGW(TAG, "Mount attempt %d failed: %s", attempt, esp_err_to_name(ret));
@@ -203,28 +201,35 @@ void SdMmc::setup() {
     if (attempt == 2 && this->power_ctrl_pin_ != nullptr) {
       ESP_LOGI(TAG, "Trying power cycle...");
       power_cycle();
+      vTaskDelay(pdMS_TO_TICKS(1000));  // Délai plus long après power cycle sur P4
     }
     
-    vTaskDelay(pdMS_TO_TICKS(200));  // Pause plus longue entre tentatives
+    vTaskDelay(pdMS_TO_TICKS(300));
   }
   
   if (ret != ESP_OK) {
+    ESP_LOGE(TAG, "Failed to mount SD card on ESP32-P4. Check:");
+    ESP_LOGE(TAG, "  1. VDDPST_5 (SD_VREF) connected to 3.3V");
+    ESP_LOGE(TAG, "  2. SD card power (TF_VCC) at 3.3V");
+    ESP_LOGE(TAG, "  3. GPIO pin connections");
+    ESP_LOGE(TAG, "  4. SD card format and compatibility");
+    
     if (ret == ESP_FAIL) {
       this->init_error_ = ErrorCode::ERR_MOUNT;
-      ESP_LOGE(TAG, "Failed to mount filesystem on SD card (slot %d)", this->slot_);
+      ESP_LOGE(TAG, "Failed to mount filesystem");
     } else {
       this->init_error_ = ErrorCode::ERR_NO_CARD;
-      ESP_LOGE(TAG, "No SD card detected on slot %d", this->slot_);
+      ESP_LOGE(TAG, "No SD card detected");
     }
     mark_failed();
     return;
   }
   
   // Diagnostic de la carte
-  ESP_LOGI(TAG, "SD Card Info (slot %d):", this->slot_);
+  ESP_LOGI(TAG, "SD Card Info (ESP32-P4 slot 1):");
   ESP_LOGI(TAG, "  Name: %s", this->card_->cid.name);
   ESP_LOGI(TAG, "  Type: %s", sd_card_type().c_str());
-  ESP_LOGI(TAG, "  Speed: %d kHz (max: %d kHz)", this->card_->max_freq_khz, SDMMC_FREQ_HIGHSPEED);
+  ESP_LOGI(TAG, "  Speed: %d kHz (max: %d kHz)", this->card_->real_freq_khz, this->card_->max_freq_khz);
   ESP_LOGI(TAG, "  Size: %llu MB", ((uint64_t)this->card_->csd.capacity * this->card_->csd.sector_size) / (1024 * 1024));
   
   #ifdef USE_TEXT_SENSOR
