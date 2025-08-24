@@ -53,6 +53,7 @@ void SdMmc::dump_config() {
   }
   if (this->power_ctrl_pin_ != nullptr) {
     LOG_PIN("  Power Ctrl Pin: ", this->power_ctrl_pin_);
+    ESP_LOGCONFIG(TAG, "  Power Inverted: %s", TRUEFALSE(this->power_ctrl_inverted_));
     ESP_LOGCONFIG(TAG, "  Power State: %s", ONOFF(this->power_enabled_));
   }
 
@@ -85,18 +86,24 @@ void SdMmc::dump_config() {
 // Nouvelles méthodes pour le contrôle d'alimentation
 void SdMmc::power_on() {
   if (this->power_ctrl_pin_ != nullptr) {
-    this->power_ctrl_pin_->digital_write(true);
+    // Appliquer l'inversion si nécessaire
+    bool level = this->power_ctrl_inverted_ ? false : true;
+    this->power_ctrl_pin_->digital_write(level);
     this->power_enabled_ = true;
-    ESP_LOGI(TAG, "SD Card power ON");
+    ESP_LOGI(TAG, "SD Card power ON (level: %s, inverted: %s)", 
+             ONOFF(level), TRUEFALSE(this->power_ctrl_inverted_));
     vTaskDelay(pdMS_TO_TICKS(150));  // Délai pour la stabilisation de l'alimentation
   }
 }
 
 void SdMmc::power_off() {
   if (this->power_ctrl_pin_ != nullptr) {
-    this->power_ctrl_pin_->digital_write(false);
+    // Appliquer l'inversion si nécessaire
+    bool level = this->power_ctrl_inverted_ ? true : false;
+    this->power_ctrl_pin_->digital_write(level);
     this->power_enabled_ = false;
-    ESP_LOGI(TAG, "SD Card power OFF");
+    ESP_LOGI(TAG, "SD Card power OFF (level: %s, inverted: %s)", 
+             ONOFF(level), TRUEFALSE(this->power_ctrl_inverted_));
     vTaskDelay(pdMS_TO_TICKS(50));  // Petit délai pour s'assurer que l'alimentation est coupée
   }
 }
