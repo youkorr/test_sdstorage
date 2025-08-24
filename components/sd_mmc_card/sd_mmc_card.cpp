@@ -147,13 +147,12 @@ void SdMmc::setup() {
     .allocation_unit_size = 64 * 1024  // Plus conservateur pour P4
   };
   
-  // Configuration du host - ESP32-P4 utilise toujours le slot 1 pour SDMMC
+  // Configuration du host - ESP32-P4 utilise le slot 1 pour SDMMC
   sdmmc_host_t host = SDMMC_HOST_DEFAULT();
-  host.slot = SDMMC_HOST_SLOT_1;  // ESP32-P4 utilise obligatoirement slot 1
+  host.slot = SDMMC_HOST_SLOT_1;  // ESP32-P4 utilise le slot 1
   host.max_freq_khz = SDMMC_FREQ_DEFAULT;  // Plus conservateur au début (20MHz)
   
-  // ESP32-P4 supporte la GPIO matrix pour SDMMC
-  host.flags |= SDMMC_HOST_FLAG_SKIP_INIT_SLOT;  // On initialise nous-mêmes le slot
+  // ESP32-P4 supporte la GPIO matrix pour SDMMC - pas besoin de SDMMC_HOST_FLAG_SKIP_INIT_SLOT
   
   sdmmc_slot_config_t slot_config = SDMMC_SLOT_CONFIG_DEFAULT();
   slot_config.width = this->mode_1bit_ ? 1 : 4;
@@ -172,16 +171,6 @@ void SdMmc::setup() {
   
   // Pullups internes activés
   slot_config.flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;
-  
-  // Initialiser le slot SDMMC_HOST_SLOT_1 pour ESP32-P4
-  ESP_LOGI(TAG, "Initializing SDMMC slot 1 for ESP32-P4");
-  esp_err_t slot_init = sdmmc_host_init_slot(SDMMC_HOST_SLOT_1, &slot_config);
-  if (slot_init != ESP_OK) {
-    ESP_LOGE(TAG, "Failed to initialize slot 1: %s", esp_err_to_name(slot_init));
-    this->init_error_ = ErrorCode::ERR_PIN_SETUP;
-    mark_failed();
-    return;
-  }
   
   // Délai supplémentaire pour stabilisation sur P4
   vTaskDelay(pdMS_TO_TICKS(500));
@@ -238,6 +227,7 @@ void SdMmc::setup() {
   #endif
   
   update_sensors();
+}
 }
 
 void SdMmc::write_file_chunked(const char *path, const uint8_t *buffer, size_t len, size_t chunk_size) {
