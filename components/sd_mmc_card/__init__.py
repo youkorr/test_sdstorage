@@ -23,7 +23,8 @@ CONF_DATA2_PIN = "data2_pin"
 CONF_DATA3_PIN = "data3_pin"
 CONF_MODE_1BIT = "mode_1bit"
 CONF_POWER_CTRL_PIN = "power_ctrl_pin"
-CONF_SLOT = "slot"  # Ajouté ici avec les autres constantes
+CONF_POWER_CTRL_INVERTED = "power_ctrl_inverted"  # Ajout du paramètre d'inversion
+CONF_SLOT = "slot"
 
 sd_mmc_card_component_ns = cg.esphome_ns.namespace("sd_mmc_card")
 SdMmc = sd_mmc_card_component_ns.class_("SdMmc", cg.Component)
@@ -34,6 +35,7 @@ SdMmcAppendFileAction = sd_mmc_card_component_ns.class_("SdMmcAppendFileAction",
 SdMmcCreateDirectoryAction = sd_mmc_card_component_ns.class_("SdMmcCreateDirectoryAction", automation.Action)
 SdMmcRemoveDirectoryAction = sd_mmc_card_component_ns.class_("SdMmcRemoveDirectoryAction", automation.Action)
 SdMmcDeleteFileAction = sd_mmc_card_component_ns.class_("SdMmcDeleteFileAction", automation.Action)
+SdMmcPowerControlAction = sd_mmc_card_component_ns.class_("SdMmcPowerControlAction", automation.Action)  # Ajout de l'action power control
 
 def validate_raw_data(value):
     if isinstance(value, str):
@@ -49,18 +51,18 @@ CONFIG_SCHEMA = cv.Schema(
         cv.GenerateID(): cv.declare_id(SdMmc),
         cv.Required(CONF_CLK_PIN): pins.internal_gpio_output_pin_number,
         cv.Required(CONF_CMD_PIN): pins.internal_gpio_output_pin_number,
-        # FIX: Utiliser pins.internal_gpio_pin_number sans paramètres
         cv.Required(CONF_DATA0_PIN): pins.internal_gpio_pin_number,
         cv.Optional(CONF_DATA1_PIN): pins.internal_gpio_pin_number,
         cv.Optional(CONF_DATA2_PIN): pins.internal_gpio_pin_number,
         cv.Optional(CONF_DATA3_PIN): pins.internal_gpio_pin_number,
         cv.Optional(CONF_MODE_1BIT, default=False): cv.boolean,
-        cv.Optional(CONF_SLOT, default=0): cv.int_range(min=0, max=1),  # Ajout du slot
+        cv.Optional(CONF_SLOT, default=0): cv.int_range(min=0, max=1),
         cv.Optional(CONF_POWER_CTRL_PIN): pins.gpio_pin_schema({
             CONF_OUTPUT: True,
             CONF_PULLUP: False,
             CONF_PULLDOWN: False,
         }),
+        cv.Optional(CONF_POWER_CTRL_INVERTED, default=False): cv.boolean,  # Ajout du paramètre d'inversion
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
@@ -70,7 +72,7 @@ async def to_code(config):
     await cg.register_component(var, config)
 
     cg.add(var.set_mode_1bit(config[CONF_MODE_1BIT]))
-    cg.add(var.set_slot(config[CONF_SLOT]))  # Ajout de la configuration du slot
+    cg.add(var.set_slot(config[CONF_SLOT]))
 
     cg.add(var.set_clk_pin(config[CONF_CLK_PIN]))
     cg.add(var.set_cmd_pin(config[CONF_CMD_PIN]))
@@ -84,6 +86,7 @@ async def to_code(config):
     if (CONF_POWER_CTRL_PIN in config):
         power_ctrl = await cg.gpio_pin_expression(config[CONF_POWER_CTRL_PIN])
         cg.add(var.set_power_ctrl_pin(power_ctrl))
+        cg.add(var.set_power_ctrl_inverted(config[CONF_POWER_CTRL_INVERTED]))  # Configuration de l'inversion
 
 
 SD_MMC_PATH_ACTION_SCHEMA = cv.Schema(
@@ -100,6 +103,13 @@ SD_MMC_WRITE_FILE_ACTION_SCHEMA = cv.Schema(
         cv.Required(CONF_DATA): cv.templatable(validate_raw_data),
     }
 ).extend(SD_MMC_PATH_ACTION_SCHEMA)
+
+SD_MMC_POWER_CONTROL_ACTION_SCHEMA = cv.Schema(
+    {
+        cv.GenerateID(): cv.use_id(SdMmc),
+        cv.Required("power_state"): cv.templatable(cv.boolean),
+    }
+)
 
 @automation.register_action(
     "sd_mmc_card.write_file", SdMmcWriteFileAction, SD_MMC_WRITE_FILE_ACTION_SCHEMA
@@ -157,6 +167,17 @@ async def sd_mmc_delete_file_to_code(config, action_id, template_arg, args):
     var = cg.new_Pvariable(action_id, template_arg, parent)
     path_ = await cg.templatable(config[CONF_PATH], args, cg.std_string)
     cg.add(var.set_path(path_))
+    return var
+
+
+@automation.register_action(
+    "sd_mmc_card.power_control", SdMmcPowerControlAction, SD_MMC_POWER_CONTROL_ACTION_SCHEMA
+)
+async def sd_mmc_power_control_to_code(config, action_id, template_arg, args):
+    parent = await cg.get_variable(config[CONF_ID])
+    var = cg.new_Pvariable(action_id, template_arg, parent)
+    power_state_ = await cg.templatable(config["power_state"], args, cg.bool_)
+    cg.add(var.set_power_state(power_state_))
     return var
 
 
