@@ -5,42 +5,40 @@
 namespace esphome {
 namespace storage {
 
-static const char *const TAG = "png_image.decoder";
+static const char *const TAG = "storage.decoder";
 
 bool ImageDecoder::set_size(int width, int height) {
-  // Set default scale factors
-  this->x_scale_ = 1.0;
-  this->y_scale_ = 1.0;
+  // Since SdImageComponent doesn't have resize_() method like online_image,
+  // we'll work with the current dimensions and calculate scale factors
+  int current_width = this->image_->get_current_width();
+  int current_height = this->image_->get_current_height();
   
-  // We can't access protected members directly, so we'll use public methods
-  // Get current dimensions to calculate scale if needed
-  int current_width = this->image_->get_width();
-  int current_height = this->image_->get_height();
-  
-  if (current_width > 0 && current_height > 0 && 
-      (current_width != width || current_height != height)) {
-    this->x_scale_ = static_cast<double>(current_width) / width;
-    this->y_scale_ = static_cast<double>(current_height) / height;
+  // If no resize is set, use the decoded image dimensions
+  if (current_width <= 0 || current_height <= 0) {
+    current_width = width;
+    current_height = height;
   }
+  
+  this->x_scale_ = static_cast<double>(current_width) / width;
+  this->y_scale_ = static_cast<double>(current_height) / height;
   
   return true;
 }
 
 void ImageDecoder::draw(int x, int y, int w, int h, const Color &color) {
-  // Calculate scaled coordinates
-  int scaled_width = static_cast<int>(std::ceil(w * this->x_scale_));
-  int scaled_height = static_cast<int>(std::ceil(h * this->y_scale_));
-  int scaled_x = static_cast<int>(x * this->x_scale_);
-  int scaled_y = static_cast<int>(y * this->y_scale_);
+  // Get the current image dimensions (similar to buffer_width_/buffer_height_)
+  int buffer_width = this->image_->get_current_width();
+  int buffer_height = this->image_->get_current_height();
   
-  // Set each pixel in the rectangle using the existing jpeg_decode_pixel method
-  for (int j = 0; j < scaled_height; j++) {
-    for (int i = 0; i < scaled_width; i++) {
-      int pixel_x = scaled_x + i;
-      int pixel_y = scaled_y + j;
-      
-      // Use the existing jpeg_decode_pixel method which is public
-      this->image_->jpeg_decode_pixel(pixel_x, pixel_y, color.r, color.g, color.b);
+  // Calculate the actual drawing bounds (following original logic)
+  auto width = std::min(buffer_width, static_cast<int>(std::ceil((x + w) * this->x_scale_)));
+  auto height = std::min(buffer_height, static_cast<int>(std::ceil((y + h) * this->y_scale_)));
+  
+  // Draw pixels using the available method (similar to draw_pixel_)
+  for (int i = static_cast<int>(x * this->x_scale_); i < width; i++) {
+    for (int j = static_cast<int>(y * this->y_scale_); j < height; j++) {
+      // Use jpeg_decode_pixel which is the closest equivalent to draw_pixel_
+      this->image_->jpeg_decode_pixel(i, j, color.r, color.g, color.b);
     }
   }
 }
