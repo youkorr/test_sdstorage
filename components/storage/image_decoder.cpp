@@ -8,15 +8,19 @@ namespace storage {
 static const char *const TAG = "png_image.decoder";
 
 bool ImageDecoder::set_size(int width, int height) {
-  // The SdImageComponent doesn't have a resize_ method, so we'll return true
-  // and handle sizing within the component itself
+  // Set default scale factors
   this->x_scale_ = 1.0;
   this->y_scale_ = 1.0;
   
-  // If the image component has resize dimensions set, calculate scale factors
-  if (this->image_->resize_width_ > 0 && this->image_->resize_height_ > 0) {
-    this->x_scale_ = static_cast<double>(this->image_->resize_width_) / width;
-    this->y_scale_ = static_cast<double>(this->image_->resize_height_) / height;
+  // We can't access protected members directly, so we'll use public methods
+  // Get current dimensions to calculate scale if needed
+  int current_width = this->image_->get_width();
+  int current_height = this->image_->get_height();
+  
+  if (current_width > 0 && current_height > 0 && 
+      (current_width != width || current_height != height)) {
+    this->x_scale_ = static_cast<double>(current_width) / width;
+    this->y_scale_ = static_cast<double>(current_height) / height;
   }
   
   return true;
@@ -29,18 +33,17 @@ void ImageDecoder::draw(int x, int y, int w, int h, const Color &color) {
   int scaled_x = static_cast<int>(x * this->x_scale_);
   int scaled_y = static_cast<int>(y * this->y_scale_);
   
-  // For each pixel in the rectangle, set it using the component's buffer directly
-  // Since we can't access the private set_pixel method, we'll need to work around this
-  
-  // Get the image buffer and set pixels directly
-  // This requires the buffer to be accessible - you may need to add a friend declaration
-  // or make ImageDecoder a friend of SdImageComponent
-  
-  // For now, just log the operation
-  ESP_LOGD(TAG, "Setting rectangle %d,%d %dx%d to color R:%d G:%d B:%d", 
-           scaled_x, scaled_y, scaled_width, scaled_height, color.r, color.g, color.b);
-  
-  // TODO: Implement direct buffer access or add public setter method to SdImageComponent
+  // Set each pixel in the rectangle
+  for (int j = 0; j < scaled_height; j++) {
+    for (int i = 0; i < scaled_width; i++) {
+      int pixel_x = scaled_x + i;
+      int pixel_y = scaled_y + j;
+      
+      // ESPHome Color doesn't have an 'a' member by default
+      // Use 255 as alpha value (fully opaque)
+      this->image_->set_pixel(pixel_x, pixel_y, color.r, color.g, color.b, 255);
+    }
+  }
 }
 
 DownloadBuffer::DownloadBuffer(size_t size) : size_(size) {
