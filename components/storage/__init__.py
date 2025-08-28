@@ -154,6 +154,10 @@ async def setup_sd_image_component(config, parent_storage):
     # FIXED: Pass strings directly instead of enum values
     cg.add(var.set_file_path(config[CONF_FILE_PATH]))
 
+    # Activer le support PNG ici
+    cg.add_library("pngle", "1.1.0")
+    cg.add_define("USE_STORAGE_PNG_SUPPORT")
+
     # Get the string values from the config (they're already strings due to our mapping)
     output_format_str = config[CONF_OUTPUT_FORMAT]  # This is already a string like "RGB565"
     byte_order_str = config[CONF_BYTE_ORDER]        # This is already a string like "LITTLE_ENDIAN"
