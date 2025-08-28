@@ -33,14 +33,14 @@ void ImageDecoder::draw(int x, int y, int w, int h, const Color &color) {
   int scaled_x = static_cast<int>(x * this->x_scale_);
   int scaled_y = static_cast<int>(y * this->y_scale_);
   
-  // Set each pixel in the rectangle
+  // Set each pixel in the rectangle using the existing jpeg_decode_pixel method
   for (int j = 0; j < scaled_height; j++) {
     for (int i = 0; i < scaled_width; i++) {
       int pixel_x = scaled_x + i;
       int pixel_y = scaled_y + j;
       
-      // Use the public wrapper method instead of private set_pixel
-      this->image_->set_decoder_pixel(pixel_x, pixel_y, color.r, color.g, color.b, 255);
+      // Use the existing jpeg_decode_pixel method which is public
+      this->image_->jpeg_decode_pixel(pixel_x, pixel_y, color.r, color.g, color.b);
     }
   }
 }
