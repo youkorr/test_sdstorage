@@ -15,12 +15,12 @@
 // Image decoder configuration for ESP-IDF
 #ifdef ESP_IDF_VERSION
   #define USE_JPEGDEC
-  #ifdef CONFIG_ESPHOME_ENABLE_PNGLE
+  #if defined(CONFIG_ESPHOME_ENABLE_PNGLE) || defined(USE_STORAGE_PNG_SUPPORT)
     #define USE_PNGLE
   #endif
 #else
   #define USE_JPEGDEC
-  #ifdef ENABLE_PNGLE
+  #if defined(ENABLE_PNGLE) || defined(USE_STORAGE_PNG_SUPPORT)
     #define USE_PNGLE
   #endif
 #endif
