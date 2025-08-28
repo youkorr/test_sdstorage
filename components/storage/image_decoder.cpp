@@ -39,9 +39,8 @@ void ImageDecoder::draw(int x, int y, int w, int h, const Color &color) {
       int pixel_x = scaled_x + i;
       int pixel_y = scaled_y + j;
       
-      // ESPHome Color doesn't have an 'a' member by default
-      // Use 255 as alpha value (fully opaque)
-      this->image_->set_pixel(pixel_x, pixel_y, color.r, color.g, color.b, 255);
+      // Use the public wrapper method instead of private set_pixel
+      this->image_->set_decoder_pixel(pixel_x, pixel_y, color.r, color.g, color.b, 255);
     }
   }
 }
