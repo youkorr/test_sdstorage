@@ -786,7 +786,7 @@ bool SdImageComponent::decode_png_image(const std::vector<uint8_t> &png_data) {
   return true;
 }
 
-// PNG initialization callback - no resize version
+// PNG initialization callback - no resize version  
 void SdImageComponent::png_init_callback_no_resize(pngle_t *pngle, uint32_t w, uint32_t h) {
   if (!current_image_component) {
     ESP_LOGE(TAG_IMAGE, "No current image component in PNG init callback");
@@ -818,14 +818,10 @@ void SdImageComponent::png_init_callback_no_resize(pngle_t *pngle, uint32_t w, u
 }
 
 // PNG draw callback - no resize version
-// FIXED: Changed uint8_t rgba[4] to const uint8_t rgba[4] to match pngle_draw_callback_t signature
 void SdImageComponent::png_draw_callback_no_resize(pngle_t *pngle, uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint8_t rgba[4]) {
   if (!current_image_component) return;
   
   SdImageComponent *component = current_image_component;
-  
-  // FIXED: ESPHome Color constructor with alpha
-  Color pixel_color(rgba[0], rgba[1], rgba[2], rgba[3]);
   
   // Direct pixel placement without resize
   for (uint32_t py = 0; py < h; py++) {
@@ -834,7 +830,6 @@ void SdImageComponent::png_draw_callback_no_resize(pngle_t *pngle, uint32_t x, u
       uint32_t img_y = y + py;
       
       if (img_x < (uint32_t)component->image_width_ && img_y < (uint32_t)component->image_height_) {
-        // FIXED: Use rgba[3] directly instead of pixel_color.a
         component->set_pixel(img_x, img_y, rgba[0], rgba[1], rgba[2], rgba[3]);
       }
     }
@@ -846,7 +841,71 @@ void SdImageComponent::png_draw_callback_no_resize(pngle_t *pngle, uint32_t x, u
   }
 }
 
-// Fix the existing callback signatures too
+// PNG done callback - MISSING IMPLEMENTATION
+void SdImageComponent::png_done_callback(pngle_t *pngle) {
+  if (!current_image_component) return;
+  
+  ESP_LOGD(TAG_IMAGE, "PNG decoding completed");
+  
+  SdImageComponent *component = current_image_component;
+  if (component->image_buffer_.size() >= 8) {
+    ESP_LOGD(TAG_IMAGE, "First 4 pixels decoded successfully");
+    
+    if (component->format_ == ImageFormat::RGB565) {
+      uint16_t pixel1 = (component->image_buffer_[1] << 8) | component->image_buffer_[0];
+      uint8_t r = ((pixel1 >> 11) & 0x1F) << 3;
+      uint8_t g = ((pixel1 >> 5) & 0x3F) << 2;
+      uint8_t b = (pixel1 & 0x1F) << 3;
+      ESP_LOGD(TAG_IMAGE, "First pixel RGB565: 0x%04X -> RGB(%d,%d,%d)", pixel1, r, g, b);
+    }
+  }
+}
+
+// Legacy PNG callbacks with resize (kept for compatibility)
+void SdImageComponent::png_init_callback(pngle_t *pngle, uint32_t w, uint32_t h) {
+  if (!current_image_component) {
+    ESP_LOGE(TAG_IMAGE, "No current image component in PNG init callback");
+    return;
+  }
+  
+  SdImageComponent *component = current_image_component;
+  
+  ESP_LOGI(TAG_IMAGE, "PNG init: %dx%d", w, h);
+  
+  // Store original dimensions
+  int orig_width = w;
+  int orig_height = h;
+  
+  // Handle resize
+  if (component->resize_width_ > 0 && component->resize_height_ > 0) {
+    component->image_width_ = component->resize_width_;
+    component->image_height_ = component->resize_height_;
+    ESP_LOGI(TAG_IMAGE, "PNG will be resized to: %dx%d", 
+             component->image_width_, component->image_height_);
+  } else {
+    component->image_width_ = orig_width;
+    component->image_height_ = orig_height;
+  }
+  
+  // Validate dimensions
+  if (component->image_width_ <= 0 || component->image_height_ <= 0 || 
+      component->image_width_ > 2048 || component->image_height_ > 2048) {
+    ESP_LOGE(TAG_IMAGE, "Invalid PNG dimensions: %dx%d", 
+             component->image_width_, component->image_height_);
+    return;
+  }
+  
+  component->format_ = ImageFormat::RGB565;
+  
+  if (!component->allocate_image_buffer()) {
+    ESP_LOGE(TAG_IMAGE, "Failed to allocate PNG image buffer");
+    return;
+  }
+  
+  std::fill(component->image_buffer_.begin(), component->image_buffer_.end(), 0);
+  ESP_LOGI(TAG_IMAGE, "PNG buffer allocated: %zu bytes", component->image_buffer_.size());
+}
+
 void SdImageComponent::png_draw_callback(pngle_t *pngle, uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint8_t rgba[4]) {
   if (!current_image_component) return;
   
@@ -901,15 +960,25 @@ bool SdImageComponent::decode_png_image(const std::vector<uint8_t> &png_data) {
 }
 
 // Empty callback stubs with correct signatures
-void SdImageComponent::png_init_callback(pngle_t *pngle, uint32_t w, uint32_t h) {}
+void SdImageComponent::png_init_callback(pngle_t *pngle, uint32_t w, uint32_t h) {
+  // Empty stub
+}
 
-void SdImageComponent::png_draw_callback(pngle_t *pngle, uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint8_t rgba[4]) {}
+void SdImageComponent::png_draw_callback(pngle_t *pngle, uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint8_t rgba[4]) {
+  // Empty stub
+}
 
-void SdImageComponent::png_done_callback(pngle_t *pngle) {}
+void SdImageComponent::png_done_callback(pngle_t *pngle) {
+  // Empty stub
+}
 
-void SdImageComponent::png_init_callback_no_resize(pngle_t *pngle, uint32_t w, uint32_t h) {}
+void SdImageComponent::png_init_callback_no_resize(pngle_t *pngle, uint32_t w, uint32_t h) {
+  // Empty stub
+}
 
-void SdImageComponent::png_draw_callback_no_resize(pngle_t *pngle, uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint8_t rgba[4]) {}
+void SdImageComponent::png_draw_callback_no_resize(pngle_t *pngle, uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint8_t rgba[4]) {
+  // Empty stub
+}
 
 #endif // USE_PNGLE
 
