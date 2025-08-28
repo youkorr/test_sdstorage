@@ -1,25 +1,22 @@
 #include "png_image.h"
-#ifdef USE_ONLINE_IMAGE_PNG_SUPPORT
+#ifdef USE_STORAGE_PNG_SUPPORT
 
 #include "esphome/components/display/display_buffer.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
 
-static const char *const TAG = "online_image.png";
-
-namespace esphome {
-namespace online_image {
+static const char *const TAG = "storage.png";
 
 /**
  * @brief Callback method that will be called by the PNGLE engine when the basic
- * data of the image is received (i.e. width and height);
+ * data of the image is received (i.e. width and height).
  *
  * @param pngle The PNGLE object, including the context data.
  * @param w The width of the image.
  * @param h The height of the image.
  */
 static void init_callback(pngle_t *pngle, uint32_t w, uint32_t h) {
-  PngDecoder *decoder = (PngDecoder *) pngle_get_user_data(pngle);
+  auto *decoder = (esphome::storage::PngDecoder *) pngle_get_user_data(pngle);
   decoder->set_size(w, h);
 }
 
@@ -35,22 +32,23 @@ static void init_callback(pngle_t *pngle, uint32_t w, uint32_t h) {
  * @param rgba The color to paint the rectangle in.
  */
 static void draw_callback(pngle_t *pngle, uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint8_t rgba[4]) {
-  PngDecoder *decoder = (PngDecoder *) pngle_get_user_data(pngle);
-  Color color(rgba[0], rgba[1], rgba[2], rgba[3]);
+  auto *decoder = (esphome::storage::PngDecoder *) pngle_get_user_data(pngle);
+  esphome::Color color(rgba[0], rgba[1], rgba[2], rgba[3]);
   decoder->draw(x, y, w, h, color);
 }
 
-PngDecoder::PngDecoder(OnlineImage *image) : ImageDecoder(image) {
-  {
-    pngle_t *pngle = this->allocator_.allocate(1, PNGLE_T_SIZE);
-    if (!pngle) {
-      ESP_LOGE(TAG, "Failed to allocate memory for PNGLE engine!");
-      return;
-    }
-    memset(pngle, 0, PNGLE_T_SIZE);
-    pngle_reset(pngle);
-    this->pngle_ = pngle;
+namespace esphome {
+namespace storage {
+
+PngDecoder::PngDecoder(SdImageComponent *image) : ImageDecoder(image) {
+  pngle_t *pngle = this->allocator_.allocate(1, PNGLE_T_SIZE);
+  if (!pngle) {
+    ESP_LOGE(TAG, "Failed to allocate memory for PNGLE engine!");
+    return;
   }
+  memset(pngle, 0, PNGLE_T_SIZE);
+  pngle_reset(pngle);
+  this->pngle_ = pngle;
 }
 
 PngDecoder::~PngDecoder() {
@@ -60,8 +58,8 @@ PngDecoder::~PngDecoder() {
   }
 }
 
-int PngDecoder::prepare(size_t download_size) {
-  ImageDecoder::prepare(download_size);
+int PngDecoder::prepare(size_t file_size) {
+  ImageDecoder::prepare(file_size);
   if (!this->pngle_) {
     ESP_LOGE(TAG, "PNG decoder engine not initialized!");
     return DECODE_ERROR_OUT_OF_MEMORY;
@@ -78,19 +76,20 @@ int HOT PngDecoder::decode(uint8_t *buffer, size_t size) {
     return DECODE_ERROR_OUT_OF_MEMORY;
   }
   if (size < 256 && size < this->download_size_ - this->decoded_bytes_) {
-    ESP_LOGD(TAG, "Waiting for data");
+    ESP_LOGD(TAG, "Waiting for more data");
     return 0;
   }
   auto fed = pngle_feed(this->pngle_, buffer, size);
   if (fed < 0) {
-    ESP_LOGE(TAG, "Error decoding image: %s", pngle_error(this->pngle_));
+    ESP_LOGE(TAG, "Error decoding PNG: %s", pngle_error(this->pngle_));
   } else {
     this->decoded_bytes_ += fed;
   }
   return fed;
 }
 
-}  // namespace online_image
+}  // namespace storage
 }  // namespace esphome
 
-#endif  // USE_ONLINE_IMAGE_PNG_SUPPORT
+#endif  // USE_STORAGE_PNG_SUPPORT
+
