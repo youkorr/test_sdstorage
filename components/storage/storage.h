@@ -190,10 +190,10 @@ class SdImageComponent : public Component, public image::Image {
 
 #ifdef USE_PNGLE
   static void png_init_callback(pngle_t *pngle, uint32_t w, uint32_t h);
-  static void png_draw_callback(pngle_t *pngle, uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint8_t rgba[4]);
+  static void png_draw_callback(pngle_t *pngle, uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint8_t rgba[4]);
   static void png_done_callback(pngle_t *pngle);
   static void png_init_callback_no_resize(pngle_t *pngle, uint32_t w, uint32_t h);
-  static void png_draw_callback_no_resize(pngle_t *pngle, uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint8_t rgba[4]);
+  static void png_draw_callback_no_resize(pngle_t *pngle, uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint8_t rgba[4]);
   pngle_t *png_decoder_{nullptr};
 #endif
 
