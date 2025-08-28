@@ -43,7 +43,7 @@ CONF_AUTO_LOAD = "auto_load"  # Uniquement pour sd_images, pas pour storage
 # FIXED: Use simple string mappings instead of enums to avoid compilation issues
 CONF_OUTPUT_IMAGE_FORMATS = {
     "RGB565": "RGB565",
-    "RGB888": "RGB888", 
+    "RGB888": "RGB888",
     "RGBA": "RGBA",
 }
 
@@ -81,6 +81,10 @@ CONFIG_SCHEMA = cv.Schema(
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
+# Ajout du support PNG
+cg.add_library("pngle", "1.1.0")
+cg.add_define("USE_STORAGE_PNG_SUPPORT")
+
 # Actions pour charger/décharger des images
 LOAD_ACTION_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.use_id(SdImageComponent),
@@ -108,32 +112,32 @@ async def sd_image_unload_action_to_code(config, action_id, template_arg, args):
 
 # Enregistrer les actions
 automation.register_action(
-    "sd_image.load", 
-    SdImageLoadAction, 
+    "sd_image.load",
+    SdImageLoadAction,
     LOAD_ACTION_SCHEMA
 )(sd_image_load_action_to_code)
 
 automation.register_action(
-    "sd_image.unload", 
-    SdImageUnloadAction, 
+    "sd_image.unload",
+    SdImageUnloadAction,
     UNLOAD_ACTION_SCHEMA
 )(sd_image_unload_action_to_code)
 
 async def to_code(config):
     """Génère le code C++ pour le composant storage"""
-    
+
     # Créer le composant principal - PAS d'auto_load ici
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
-    
+
     # Configuration du composant principal
     cg.add(var.set_platform(config[CONF_PLATFORM]))
     cg.add(var.set_root_path(config[CONF_ROOT_PATH]))
-    
+
     if CONF_SD_COMPONENT in config:
         sd_comp = await cg.get_variable(config[CONF_SD_COMPONENT])
         cg.add(var.set_sd_component(sd_comp))
-    
+
     # Configuration des images SD - auto_load configuré ici
     if CONF_SD_IMAGES in config:
         for img_config in config[CONF_SD_IMAGES]:
@@ -143,32 +147,32 @@ async def setup_sd_image_component(config, parent_storage):
     """Configure un SdImageComponent"""
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
-    
+
     # Lier au composant storage parent
     cg.add(var.set_storage_component(parent_storage))
-    
+
     # FIXED: Pass strings directly instead of enum values
     cg.add(var.set_file_path(config[CONF_FILE_PATH]))
-    
+
     # Get the string values from the config (they're already strings due to our mapping)
     output_format_str = config[CONF_OUTPUT_FORMAT]  # This is already a string like "RGB565"
     byte_order_str = config[CONF_BYTE_ORDER]        # This is already a string like "LITTLE_ENDIAN"
-    
+
     cg.add(var.set_output_format_string(output_format_str))
     cg.add(var.set_byte_order_string(byte_order_str))
-    
+
     # Configuration auto_load - SEULEMENT pour les sd_images
     cg.add(var.set_auto_load(config[CONF_AUTO_LOAD]))
-    
+
     if CONF_RESIZE in config:
         cg.add(var.set_resize(config[CONF_RESIZE][0], config[CONF_RESIZE][1]))
-    
+
     return var
 
 # Encodeur personnalisé pour les images SD
 class SdImageEncoder(image.ImageEncoder):
     """Encodeur d'image pour les images stockées sur carte SD"""
-    
+
     allow_config = {image.CONF_ALPHA_CHANNEL, image.CONF_CHROMA_KEY, image.CONF_OPAQUE}
 
     def __init__(self, width, height, transparency, dither, invert_alpha, storage_component, file_path, output_format="RGB565"):
@@ -176,7 +180,7 @@ class SdImageEncoder(image.ImageEncoder):
         self.storage_component = storage_component
         self.file_path = file_path
         self.output_format = output_format
-        
+
     @staticmethod
     def validate(value):
         # Validation spécifique pour SD image
@@ -199,13 +203,13 @@ def register_sd_image_type():
     # Ajouter à la liste des types d'images disponibles
     if hasattr(image, 'IMAGE_TYPE'):
         image.IMAGE_TYPE["SD_IMAGE"] = SdImageEncoder
-    
+
     # Ajouter aussi aux formats d'image reconnus pour la compatibilité LVGL
     if hasattr(image, 'IMAGE_TYPE_SCHEMA'):
         # Étendre le schéma des types d'images
         image.IMAGE_TYPE_SCHEMA = cv.one_of(
-            *list(image.IMAGE_TYPE_SCHEMA.validators), 
-            "SD_IMAGE", 
+            *list(image.IMAGE_TYPE_SCHEMA.validators),
+            "SD_IMAGE",
             upper=True
         )
 
@@ -227,26 +231,26 @@ async def image_to_code_hook(config):
         # Générer un SdImageComponent au lieu d'une Image standard
         var = cg.new_Pvariable(config[CONF_ID])
         await cg.register_component(var, config)
-        
+
         cg.add(var.set_file_path(config[CONF_FILE]))
-        
+
         if CONF_STORAGE_COMPONENT in config:
             storage = await cg.get_variable(config[CONF_STORAGE_COMPONENT])
             cg.add(var.set_storage_component(storage))
-        
+
         # Use string methods with proper string values
         format_str = config.get(CONF_OUTPUT_FORMAT, "RGB565")
         byte_order_str = config.get(CONF_BYTE_ORDER, "LITTLE_ENDIAN")
-        
+
         cg.add(var.set_output_format_string(format_str))
         cg.add(var.set_byte_order_string(byte_order_str))
-        
+
         # Configuration auto_load dans le hook aussi - SEULEMENT si présent
         auto_load = config.get(CONF_AUTO_LOAD, True)
         cg.add(var.set_auto_load(auto_load))
-        
+
         return var
-    
+
     return None
 
 # Configuration d'initialisation
@@ -254,7 +258,7 @@ def setup_hooks():
     """Configure les hooks d'intégration avec ESPHome"""
     # Enregistrer le type d'image
     register_sd_image_type()
-    
+
     # Ajouter le hook pour les images si disponible
     if hasattr(image, 'register_image_hook'):
         image.register_image_hook(image_to_code_hook)
@@ -264,3 +268,4 @@ try:
     setup_hooks()
 except Exception as e:
     _LOGGER.warning(f"Failed to setup hooks: {e}")
+
