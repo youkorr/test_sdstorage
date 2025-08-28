@@ -8,31 +8,36 @@ namespace storage {
 static const char *const TAG = "png_image.decoder";
 
 bool ImageDecoder::set_size(int width, int height) {
-  // Use get_width() and get_height() instead of buffer_width_/buffer_height_
-  // Assuming the image component has these methods or similar
-  bool success = true; // You may need to implement actual resize logic here
+  // The SdImageComponent doesn't have a resize_ method, so we'll return true
+  // and handle sizing within the component itself
+  this->x_scale_ = 1.0;
+  this->y_scale_ = 1.0;
   
-  // Get actual dimensions from the image component
-  int buffer_width = this->image_->get_width();
-  int buffer_height = this->image_->get_height();
+  // If the image component has resize dimensions set, calculate scale factors
+  if (this->image_->resize_width_ > 0 && this->image_->resize_height_ > 0) {
+    this->x_scale_ = static_cast<double>(this->image_->resize_width_) / width;
+    this->y_scale_ = static_cast<double>(this->image_->resize_height_) / height;
+  }
   
-  this->x_scale_ = static_cast<double>(buffer_width) / width;
-  this->y_scale_ = static_cast<double>(buffer_height) / height;
-  return success;
+  return true;
 }
 
 void ImageDecoder::draw(int x, int y, int w, int h, const Color &color) {
-  // Get dimensions using proper methods
-  int buffer_width = this->image_->get_width();
-  int buffer_height = this->image_->get_height();
+  // Calculate scaled coordinates
+  int scaled_width = static_cast<int>(std::ceil(w * this->x_scale_));
+  int scaled_height = static_cast<int>(std::ceil(h * this->y_scale_));
+  int scaled_x = static_cast<int>(x * this->x_scale_);
+  int scaled_y = static_cast<int>(y * this->y_scale_);
   
-  auto width = std::min(buffer_width, static_cast<int>(std::ceil((x + w) * this->x_scale_)));
-  auto height = std::min(buffer_height, static_cast<int>(std::ceil((y + h) * this->y_scale_)));
-  
-  for (int i = x * this->x_scale_; i < width; i++) {
-    for (int j = y * this->y_scale_; j < height; j++) {
-      // Use draw_pixel_at instead of draw_pixel_
-      this->image_->draw_pixel_at(i, j, color);
+  // Set each pixel in the rectangle
+  for (int j = 0; j < scaled_height; j++) {
+    for (int i = 0; i < scaled_width; i++) {
+      int pixel_x = scaled_x + i;
+      int pixel_y = scaled_y + j;
+      
+      // Use the component's set_pixel method directly if friend access is granted,
+      // or use a public wrapper method like set_decoder_pixel
+      this->image_->set_pixel(pixel_x, pixel_y, color.r, color.g, color.b, color.a);
     }
   }
 }
