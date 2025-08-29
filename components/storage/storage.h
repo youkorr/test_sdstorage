@@ -157,6 +157,7 @@ class SdImageComponent : public Component, public image::Image {
   int resize_width_{0};
   int resize_height_{0};
   ImageFormat format_{ImageFormat::RGB565};
+  SdByteOrder byte_order_{SdByteOrder::LITTLE_ENDIAN_SD};
 
  private:
   // Retry logic for image loading
