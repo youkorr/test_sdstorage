@@ -203,6 +203,15 @@ void SdImageComponent::dump_config() {
   }
 }
 
+// REQUIRED VIRTUAL METHODS - These fix the linker error
+int SdImageComponent::get_width() const {
+  return this->get_current_width();
+}
+
+int SdImageComponent::get_height() const {
+  return this->get_current_height();
+}
+
 // Compatibility methods for YAML configuration
 void SdImageComponent::set_output_format_string(const std::string &format) {
   if (format == "RGB565") {
@@ -862,7 +871,7 @@ void SdImageComponent::png_draw_callback_no_resize(pngle_t *pngle, uint32_t x, u
   }
 }
 
-// PNG done callback - MISSING IMPLEMENTATION
+// PNG done callback
 void SdImageComponent::png_done_callback(pngle_t *pngle) {
   if (!current_image_component) return;
   
