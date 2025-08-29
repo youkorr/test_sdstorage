@@ -56,7 +56,7 @@ CONF_BYTE_ORDERS = {
 SdImageLoadAction = storage_ns.class_("SdImageLoadAction", automation.Action)
 SdImageUnloadAction = storage_ns.class_("SdImageUnloadAction", automation.Action)
 
-# Schema for SdImageComponent
+# Schema for SdImageComponent - auto_load désactivé par défaut pour chargement à la demande
 SD_IMAGE_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(SdImageComponent),
@@ -65,7 +65,7 @@ SD_IMAGE_SCHEMA = cv.Schema(
         cv.Optional(CONF_BYTE_ORDER, default="LITTLE_ENDIAN"): cv.enum(CONF_BYTE_ORDERS, upper=True),
         cv.Optional(CONF_RESIZE): cv.dimensions,
         cv.Optional(CONF_TYPE, default="SD_IMAGE"): cv.string,
-        cv.Optional(CONF_AUTO_LOAD, default=True): cv.boolean,
+        cv.Optional(CONF_AUTO_LOAD, default=False): cv.boolean,  # False par défaut pour chargement intégré
     }
 )
 
@@ -119,7 +119,7 @@ automation.register_action(
 )(sd_image_unload_action_to_code)
 
 async def to_code(config):
-    """Generate C++ code for storage component"""
+    """Generate C++ code for storage component avec optimisations pour chargement à la demande"""
 
     # Create main component
     var = cg.new_Pvariable(config[CONF_ID])
@@ -138,13 +138,18 @@ async def to_code(config):
     cg.add_define("USE_PNGLE")
     cg.add_define("CONFIG_ESPHOME_ENABLE_PNGLE")
     
-    # Configure SD images
+    # Ajout de defines pour le chargement à la demande et optimisations PSRAM
+    cg.add_define("USE_ON_DEMAND_IMAGE_LOADING")
+    cg.add_define("USE_PSRAM_OPTIMIZATION")
+    cg.add_define("USE_SMART_MEMORY_MANAGEMENT")
+    
+    # Configure SD images avec chargement à la demande
     if CONF_SD_IMAGES in config:
         for img_config in config[CONF_SD_IMAGES]:
             await setup_sd_image_component(img_config, var)
 
 async def setup_sd_image_component(config, parent_storage):
-    """Configure an SdImageComponent"""
+    """Configure an SdImageComponent avec chargement à la demande intégré"""
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
@@ -159,8 +164,9 @@ async def setup_sd_image_component(config, parent_storage):
     cg.add(var.set_output_format_string(output_format_str))
     cg.add(var.set_byte_order_string(byte_order_str))
 
-    # Set auto load
-    cg.add(var.set_auto_load(config[CONF_AUTO_LOAD]))
+    # IMPORTANT : Forcer auto_load à False pour activer le chargement à la demande
+    # Ignore la configuration utilisateur pour garantir le bon fonctionnement
+    cg.add(var.set_auto_load(False))
 
     if CONF_RESIZE in config:
         cg.add(var.set_resize(config[CONF_RESIZE][0], config[CONF_RESIZE][1]))
