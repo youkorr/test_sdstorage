@@ -1,3 +1,5 @@
+# Dans __init__.py - Configuration avec auto_load global
+
 from __future__ import annotations
 
 import logging
@@ -38,7 +40,7 @@ CONF_BYTE_ORDER = "byte_order"
 CONF_SD_COMPONENT = "sd_component"
 CONF_SD_IMAGES = "sd_images"
 CONF_FILE_PATH = "file_path"
-CONF_AUTO_LOAD = "auto_load"
+CONF_AUTO_LOAD = "auto_load"  # Maintenant au niveau global
 
 # Image format mappings
 CONF_OUTPUT_IMAGE_FORMATS = {
@@ -56,7 +58,7 @@ CONF_BYTE_ORDERS = {
 SdImageLoadAction = storage_ns.class_("SdImageLoadAction", automation.Action)
 SdImageUnloadAction = storage_ns.class_("SdImageUnloadAction", automation.Action)
 
-# Schema for SdImageComponent - auto_load désactivé par défaut pour chargement à la demande
+# Schema pour SdImageComponent - SUPPRESSION de auto_load individuel
 SD_IMAGE_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(SdImageComponent),
@@ -65,22 +67,23 @@ SD_IMAGE_SCHEMA = cv.Schema(
         cv.Optional(CONF_BYTE_ORDER, default="LITTLE_ENDIAN"): cv.enum(CONF_BYTE_ORDERS, upper=True),
         cv.Optional(CONF_RESIZE): cv.dimensions,
         cv.Optional(CONF_TYPE, default="SD_IMAGE"): cv.string,
-        cv.Optional(CONF_AUTO_LOAD, default=False): cv.boolean,  # False par défaut pour chargement intégré
+        # SUPPRIMÉ: auto_load individuel - maintenant géré au niveau global
     }
 )
 
-# Main schema for StorageComponent
+# Schema principal pour StorageComponent AVEC auto_load global
 CONFIG_SCHEMA = cv.Schema(
     {
         cv.GenerateID(): cv.declare_id(StorageComponent),
         cv.Optional(CONF_PLATFORM, default="sd_direct"): cv.string,
         cv.Optional(CONF_SD_COMPONENT): cv.use_id(SdMmc),
         cv.Optional(CONF_ROOT_PATH, default="/"): cv.string,
+        cv.Optional(CONF_AUTO_LOAD, default=True): cv.boolean,  # AUTO_LOAD GLOBAL
         cv.Optional(CONF_SD_IMAGES, default=[]): cv.ensure_list(SD_IMAGE_SCHEMA),
     }
 ).extend(cv.COMPONENT_SCHEMA)
 
-# Action schemas
+# Action schemas (inchangés)
 LOAD_ACTION_SCHEMA = cv.Schema({
     cv.GenerateID(): cv.use_id(SdImageComponent),
     cv.Optional(CONF_FILE_PATH): cv.templatable(cv.string),
@@ -119,7 +122,7 @@ automation.register_action(
 )(sd_image_unload_action_to_code)
 
 async def to_code(config):
-    """Generate C++ code for storage component avec optimisations pour chargement à la demande"""
+    """Generate C++ code for storage component avec auto_load global"""
 
     # Create main component
     var = cg.new_Pvariable(config[CONF_ID])
@@ -129,31 +132,40 @@ async def to_code(config):
     cg.add(var.set_platform(config[CONF_PLATFORM]))
     cg.add(var.set_root_path(config[CONF_ROOT_PATH]))
 
+    # NOUVEAU: Configuration auto_load global
+    cg.add(var.set_auto_load(config[CONF_AUTO_LOAD]))
+
     if CONF_SD_COMPONENT in config:
         sd_comp = await cg.get_variable(config[CONF_SD_COMPONENT])
         cg.add(var.set_sd_component(sd_comp))
 
-    # Add PNG support library and defines
+    # Add libraries and defines
     cg.add_library("pngle", "1.1.0")
     cg.add_define("USE_PNGLE")
     cg.add_define("CONFIG_ESPHOME_ENABLE_PNGLE")
     
-    # Ajout de defines pour le chargement à la demande et optimisations PSRAM
-    cg.add_define("USE_ON_DEMAND_IMAGE_LOADING")
-    cg.add_define("USE_PSRAM_OPTIMIZATION")
-    cg.add_define("USE_SMART_MEMORY_MANAGEMENT")
+    # Defines pour le système hybride
+    if config[CONF_AUTO_LOAD]:
+        cg.add_define("USE_GLOBAL_AUTO_LOAD")
+        _LOGGER.info("Storage configured with global auto-load enabled")
+    else:
+        cg.add_define("USE_ON_DEMAND_ONLY")
+        _LOGGER.info("Storage configured for on-demand loading only")
     
-    # Configure SD images avec chargement à la demande
+    cg.add_define("USE_HYBRID_LOADING_SYSTEM")
+    
+    # Configure SD images
     if CONF_SD_IMAGES in config:
+        _LOGGER.info(f"Configuring {len(config[CONF_SD_IMAGES])} SD images with auto_load={config[CONF_AUTO_LOAD]}")
         for img_config in config[CONF_SD_IMAGES]:
             await setup_sd_image_component(img_config, var)
 
 async def setup_sd_image_component(config, parent_storage):
-    """Configure an SdImageComponent avec chargement à la demande intégré"""
+    """Configure an SdImageComponent avec système hybride global"""
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
 
-    # Link to parent storage component
+    # Link to parent storage component (s'enregistre automatiquement)
     cg.add(var.set_storage_component(parent_storage))
     cg.add(var.set_file_path(config[CONF_FILE_PATH]))
 
@@ -163,10 +175,6 @@ async def setup_sd_image_component(config, parent_storage):
 
     cg.add(var.set_output_format_string(output_format_str))
     cg.add(var.set_byte_order_string(byte_order_str))
-
-    # IMPORTANT : Forcer auto_load à False pour activer le chargement à la demande
-    # Ignore la configuration utilisateur pour garantir le bon fonctionnement
-    cg.add(var.set_auto_load(False))
 
     if CONF_RESIZE in config:
         cg.add(var.set_resize(config[CONF_RESIZE][0], config[CONF_RESIZE][1]))
