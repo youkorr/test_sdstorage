@@ -611,8 +611,16 @@ int SdImageComponent::jpeg_decode_callback_no_resize(JPEGDRAW *pDraw) {
         size_t offset = (img_y * component->image_width_ + img_x) * 2;
         
         if (offset + 1 < component->image_buffer_.size()) {
-          component->image_buffer_[offset] = rgb565 & 0xFF;
-          component->image_buffer_[offset + 1] = (rgb565 >> 8) & 0xFF;
+          // Respect byte order configuration
+          if (component->byte_order_ == SdByteOrder::BIG_ENDIAN_SD) {
+            // Big endian: MSB first
+            component->image_buffer_[offset] = (rgb565 >> 8) & 0xFF;
+            component->image_buffer_[offset + 1] = rgb565 & 0xFF;
+          } else {
+            // Little endian: LSB first (default)
+            component->image_buffer_[offset] = rgb565 & 0xFF;
+            component->image_buffer_[offset + 1] = (rgb565 >> 8) & 0xFF;
+          }
         }
       }
     }
