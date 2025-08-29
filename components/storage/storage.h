@@ -34,7 +34,6 @@
 #include <pngle.h>
 #endif
 
-
 namespace esphome {
 namespace storage {
 
@@ -89,7 +88,7 @@ class StorageComponent : public Component {
 };
 
 // =====================================================
-// SdImageComponent - SD Card Image Component
+// SdImageComponent - SD Card Image Component avec chargement à la demande
 // =====================================================
 class SdImageComponent : public Component, public image::Image {
  public:
@@ -117,19 +116,28 @@ class SdImageComponent : public Component, public image::Image {
   void set_output_format_string(const std::string &format);
   void set_byte_order_string(const std::string &byte_order);
   
-  // Override Image methods with exact ESPHome signatures
+  // Override Image methods avec chargement automatique à la demande
   void draw(int x, int y, display::Display *display, Color color_on, Color color_off) override;
-  int get_width() const override { return this->get_current_width(); }
-  int get_height() const override { return this->get_current_height(); }
+  int get_width() const override;
+  int get_height() const override;
   
-  // Loading/unloading
+  // Loading/unloading methods
   bool load_image();
   bool load_image_from_path(const std::string &path);
   void unload_image();
   bool reload_image();
   
+  // Méthodes pour chargement automatique intégré
+  bool ensure_loaded();
+  bool load_when_needed();
+  bool load_dimensions_only() const;
+  
   // Finalize loading
   void finalize_image_load();
+  
+  // Gestion mémoire PSRAM améliorée
+  void force_free_psram();
+  size_t get_memory_usage() const;
   
   // Status
   bool is_loaded() const { return this->image_loaded_; }
@@ -160,7 +168,26 @@ class SdImageComponent : public Component, public image::Image {
   SdByteOrder byte_order_{SdByteOrder::LITTLE_ENDIAN_SD};
 
  private:
-  // Retry logic for image loading
+  // État de chargement amélioré pour système à la demande
+  enum class LoadState {
+    NOT_LOADED,
+    LOADING,
+    LOADED,
+    FAILED
+  };
+  
+  LoadState load_state_{LoadState::NOT_LOADED};
+  uint32_t last_load_attempt_{0};
+  uint32_t load_retry_count_{0};
+  static const uint32_t MAX_LOAD_RETRIES = 3;
+  static const uint32_t LOAD_RETRY_DELAY_MS = 500;
+  
+  // Cache des dimensions pour éviter le chargement juste pour obtenir les tailles
+  mutable int cached_width_{0};
+  mutable int cached_height_{0};
+  mutable bool dimensions_cached_{false};
+  
+  // Retry logic pour auto-loading (legacy)
   bool retry_load_{false};
   uint32_t last_retry_attempt_{0};
   static const uint32_t RETRY_INTERVAL_MS = 2000;
@@ -222,6 +249,7 @@ class SdImageComponent : public Component, public image::Image {
   // Utility methods
   void list_directory_contents(const std::string &dir_path);
   bool extract_jpeg_dimensions(const std::vector<uint8_t> &data, int &width, int &height) const;
+  bool extract_png_dimensions(const std::vector<uint8_t> &data, int &width, int &height) const;
   
   // Format helpers
   std::string format_to_string() const;
