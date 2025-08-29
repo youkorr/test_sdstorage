@@ -37,10 +37,91 @@ void StorageComponent::setup() {
   ESP_LOGCONFIG(TAG, "  Platform: %s", this->platform_.c_str());
   ESP_LOGCONFIG(TAG, "  Root path: %s", this->root_path_.c_str());
   ESP_LOGCONFIG(TAG, "  SD component: %s", this->sd_component_ ? "configured" : "not configured");
+  ESP_LOGCONFIG(TAG, "  Auto load: %s", this->auto_load_ ? "YES" : "NO (on-demand)");
+  ESP_LOGCONFIG(TAG, "  Registered images: %zu", this->sd_images_.size());
+  
+  // Si auto_load est activé, attendre un peu que la SD soit prête puis charger toutes les images
+  if (this->auto_load_) {
+    ESP_LOGI(TAG, "Auto-load enabled globally - will load all images during setup");
+  } else {
+    ESP_LOGI(TAG, "Auto-load disabled - images will load on-demand");
+  }
 }
 
 void StorageComponent::loop() {
-  // Nothing to do in loop
+  // Auto-load global avec retry si nécessaire
+  if (this->auto_load_) {
+    static uint32_t last_auto_load_attempt = 0;
+    static bool auto_load_attempted = false;
+    
+    if (!auto_load_attempted) {
+      uint32_t now = millis();
+      if (now > 2000) { // Attendre 2s après le boot pour la SD
+        ESP_LOGI(TAG, "Attempting global auto-load of all images...");
+        this->load_all_images();
+        auto_load_attempted = true;
+        last_auto_load_attempt = now;
+      }
+    } else {
+      // Retry logic pour les images qui ont échoué
+      uint32_t now = millis();
+      if (now - last_auto_load_attempt > 10000) { // Retry toutes les 10s
+        bool has_failed_images = false;
+        for (SdImageComponent* img : this->sd_images_) {
+          if (!img->is_loaded()) {
+            has_failed_images = true;
+            break;
+          }
+        }
+        
+        if (has_failed_images) {
+          ESP_LOGI(TAG, "Retrying failed image loads...");
+          this->load_all_images();
+          last_auto_load_attempt = now;
+        }
+      }
+    }
+  }
+}
+
+void StorageComponent::load_all_images() {
+  ESP_LOGI(TAG, "Loading all registered SD images (%zu total)", this->sd_images_.size());
+  
+  int loaded_count = 0;
+  int failed_count = 0;
+  
+  for (SdImageComponent* img : this->sd_images_) {
+    if (img->is_loaded()) {
+      loaded_count++;
+      continue; // Déjà chargée
+    }
+    
+    ESP_LOGI(TAG, "Auto-loading: %s", img->get_file_path().c_str());
+    if (img->load_image()) {
+      loaded_count++;
+      ESP_LOGI(TAG, "  ✓ Success: %s", img->get_file_path().c_str());
+    } else {
+      failed_count++;
+      ESP_LOGW(TAG, "  ✗ Failed: %s", img->get_file_path().c_str());
+    }
+    
+    // Yield entre les chargements pour éviter les watchdog
+    App.feed_wdt();
+    yield();
+  }
+  
+  ESP_LOGI(TAG, "Auto-load complete: %d loaded, %d failed, %d total", 
+           loaded_count, failed_count, this->sd_images_.size());
+}
+
+void StorageComponent::unload_all_images() {
+  ESP_LOGI(TAG, "Unloading all registered SD images");
+  
+  for (SdImageComponent* img : this->sd_images_) {
+    img->unload_image();
+  }
+  
+  ESP_LOGI(TAG, "All images unloaded");
 }
 
 void StorageComponent::dump_config() {
