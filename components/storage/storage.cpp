@@ -218,7 +218,13 @@ void SdImageComponent::set_output_format_string(const std::string &format) {
 }
 
 void SdImageComponent::set_byte_order_string(const std::string &byte_order) {
-  ESP_LOGD(TAG_IMAGE, "Byte order set to: %s", byte_order.c_str());
+  if (byte_order == "BIG_ENDIAN") {
+    this->byte_order_ = SdByteOrder::BIG_ENDIAN_SD;
+    ESP_LOGD(TAG_IMAGE, "Byte order set to: BIG_ENDIAN");
+  } else {
+    this->byte_order_ = SdByteOrder::LITTLE_ENDIAN_SD;
+    ESP_LOGD(TAG_IMAGE, "Byte order set to: LITTLE_ENDIAN");
+  }
 }
 
 // Implementation of draw() method according to ESPHome source code
@@ -421,7 +427,14 @@ Color SdImageComponent::get_pixel_color(int x, int y) const {
   
   switch (this->format_) {
     case ImageFormat::RGB565: {
-      uint16_t rgb565 = this->image_buffer_[offset] | (this->image_buffer_[offset + 1] << 8);
+      uint16_t rgb565;
+      if (this->byte_order_ == SdByteOrder::BIG_ENDIAN_SD) {
+        // Big endian: MSB en premier
+        rgb565 = (this->image_buffer_[offset] << 8) | this->image_buffer_[offset + 1];
+      } else {
+        // Little endian: LSB en premier
+        rgb565 = this->image_buffer_[offset] | (this->image_buffer_[offset + 1] << 8);
+      }
       uint8_t r = ((rgb565 >> 11) & 0x1F) << 3;
       uint8_t g = ((rgb565 >> 5) & 0x3F) << 2;
       uint8_t b = (rgb565 & 0x1F) << 3;
@@ -1177,8 +1190,16 @@ void SdImageComponent::set_pixel(int x, int y, uint8_t r, uint8_t g, uint8_t b, 
   switch (this->format_) {
     case ImageFormat::RGB565: {
       uint16_t rgb565 = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3);
-      this->image_buffer_[offset] = rgb565 & 0xFF;
-      this->image_buffer_[offset + 1] = (rgb565 >> 8) & 0xFF;
+      
+      if (this->byte_order_ == SdByteOrder::BIG_ENDIAN_SD) {
+        // Big endian: MSB en premier
+        this->image_buffer_[offset] = (rgb565 >> 8) & 0xFF;
+        this->image_buffer_[offset + 1] = rgb565 & 0xFF;
+      } else {
+        // Little endian: LSB en premier (défaut)
+        this->image_buffer_[offset] = rgb565 & 0xFF;
+        this->image_buffer_[offset + 1] = (rgb565 >> 8) & 0xFF;
+      }
       break;
     }
     case ImageFormat::RGB888:
