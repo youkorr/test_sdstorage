@@ -18,10 +18,16 @@
   #if defined(CONFIG_ESPHOME_ENABLE_PNGLE) || defined(USE_STORAGE_PNG_SUPPORT)
     #define USE_PNGLE
   #endif
+  #if defined(CONFIG_ESPHOME_ENABLE_ANIMATEDGIF) || defined(USE_STORAGE_GIF_SUPPORT)
+    #define USE_ANIMATEDGIF
+  #endif
 #else
   #define USE_JPEGDEC
   #if defined(ENABLE_PNGLE) || defined(USE_STORAGE_PNG_SUPPORT)
     #define USE_PNGLE
+  #endif
+  #if defined(ENABLE_ANIMATEDGIF) || defined(USE_STORAGE_GIF_SUPPORT)
+    #define USE_ANIMATEDGIF
   #endif
 #endif
 
@@ -32,6 +38,10 @@
 
 #ifdef USE_PNGLE
 #include <pngle.h>
+#endif
+
+#ifdef USE_ANIMATEDGIF
+#include <AnimatedGIF.h>
 #endif
 
 namespace esphome {
@@ -101,7 +111,7 @@ class StorageComponent : public Component {
 };
 
 // =====================================================
-// SdImageComponent - SD Card Image Component
+// SdImageComponent - SD Card Image Component avec support GIF
 // =====================================================
 class SdImageComponent : public Component, public image::Image {
  public:
@@ -163,7 +173,7 @@ class SdImageComponent : public Component, public image::Image {
   uint8_t* get_image_data() { return this->image_buffer_.empty() ? nullptr : this->image_buffer_.data(); }
   size_t get_image_data_size() const { return this->image_buffer_.size(); }
   
-  // NOUVEAU: Méthodes pour LVGL avec chargement automatique
+  // NOUVEAU: Méthodes pour LVGL avec chargement automatique intégré
   const uint8_t* get_image_data_for_lvgl();
   size_t get_image_data_size_for_lvgl();
   
@@ -205,21 +215,24 @@ class SdImageComponent : public Component, public image::Image {
   uint32_t last_retry_attempt_{0};
   static const uint32_t RETRY_INTERVAL_MS = 2000;
   
-  // File type detection
+  // File type detection avec support GIF
   enum class FileType {
     UNKNOWN,
     JPEG,
-    PNG
+    PNG,
+    GIF  // NOUVEAU
   };
   
   FileType detect_file_type(const std::vector<uint8_t> &data) const;
   bool is_jpeg_data(const std::vector<uint8_t> &data) const;
   bool is_png_data(const std::vector<uint8_t> &data) const;
+  bool is_gif_data(const std::vector<uint8_t> &data) const;  // NOUVEAU
   
-  // Image decoding
+  // Image decoding avec GIF
   bool decode_image(const std::vector<uint8_t> &data);
   bool decode_jpeg_image(const std::vector<uint8_t> &jpeg_data);
   bool decode_png_image(const std::vector<uint8_t> &png_data);
+  bool decode_gif_image(const std::vector<uint8_t> &gif_data);  // NOUVEAU
   
   // Decoder callbacks and helpers
 #ifdef USE_JPEGDEC
@@ -236,6 +249,11 @@ class SdImageComponent : public Component, public image::Image {
   static void png_init_callback_no_resize(pngle_t *pngle, uint32_t w, uint32_t h);
   static void png_draw_callback_no_resize(pngle_t *pngle, uint32_t x, uint32_t y, uint32_t w, uint32_t h, const uint8_t rgba[4]);
   pngle_t *png_decoder_{nullptr};
+#endif
+
+#ifdef USE_ANIMATEDGIF
+  static void GIFDraw(GIFDRAW *pDraw);  // NOUVEAU: Callback GIF
+  ANIMATEDGIF *gif_decoder_{nullptr};  // NOUVEAU: Decoder GIF
 #endif
 
   // Image processing
