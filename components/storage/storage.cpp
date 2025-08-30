@@ -230,7 +230,8 @@ void SdImageComponent::setup() {
   this->type_ = image::IMAGE_TYPE_RGB565;
   this->bpp_ = 16;
   this->data_start_ = nullptr;
-  this->has_transparency = image::TRANSPARENCY_OPAQUE;  // Fixed: removed underscore
+  this->has_transparency = false;
+                                       
 }
 
 // MODIFIER la méthode loop() existante:
