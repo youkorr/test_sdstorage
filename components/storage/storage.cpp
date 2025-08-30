@@ -5,7 +5,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <algorithm>
-#include <gif.h>
+#include <AnimatedGIF.h>
 
 
 // Include yield function for ESP32/ESP8266
