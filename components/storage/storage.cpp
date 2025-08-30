@@ -211,64 +211,84 @@ void SdImageComponent::setup() {
   ESP_LOGCONFIG(TAG_IMAGE, "  File path: %s", this->file_path_.c_str());
   ESP_LOGCONFIG(TAG_IMAGE, "  Resize: %dx%d", this->resize_width_, this->resize_height_);
   ESP_LOGCONFIG(TAG_IMAGE, "  Format: %s", this->format_to_string().c_str());
-  ESP_LOGCONFIG(TAG_IMAGE, "  Auto load: %s", this->auto_load_ ? "YES" : "NO");
   ESP_LOGCONFIG(TAG_IMAGE, "  Storage component: %s", this->storage_component_ ? "configured" : "not configured");
-  ESP_LOGCONFIG(TAG_IMAGE, "  Decoders: JPEG %s, PNG %s", 
-#ifdef USE_JPEGDEC
-                "available"
-#else
-                "not available"
-#endif
-                ,
-#ifdef USE_PNGLE
-                "available"
-#else
-                "not available"
-#endif
-                );
   
-  // Auto-loading with additional checks
-  if (this->auto_load_) {
-    if (this->file_path_.empty()) {
-      ESP_LOGW(TAG_IMAGE, "Auto-load enabled but no file path configured!");
-      return;
-    }
+  if (this->storage_component_) {
+    bool global_auto_load = this->storage_component_->get_auto_load();
+    ESP_LOGCONFIG(TAG_IMAGE, "  Global auto load: %s", global_auto_load ? "YES" : "NO (on-demand)");
     
-    if (!this->storage_component_) {
-      ESP_LOGW(TAG_IMAGE, "Auto-load enabled but no storage component configured!");
-      return;
-    }
-    
-    // Wait for SD card to be ready
-    ESP_LOGI(TAG_IMAGE, "Waiting for SD card to be ready...");
-    delay(500);
-    
-    ESP_LOGI(TAG_IMAGE, "Auto-loading image from: %s", this->file_path_.c_str());
-    if (this->load_image()) {
-      ESP_LOGI(TAG_IMAGE, "Image auto-loaded successfully!");
+    if (global_auto_load) {
+      ESP_LOGI(TAG_IMAGE, "Image will be loaded by global auto-load system");
     } else {
-      ESP_LOGW(TAG_IMAGE, "Failed to auto-load image, will retry later");
-      this->retry_load_ = true;
+      ESP_LOGI(TAG_IMAGE, "Image configured for on-demand loading");
     }
   }
+  
+  // Initialiser les propriétés de base avec des valeurs par défaut
+  this->width_ = this->resize_width_ > 0 ? this->resize_width_ : 1;
+  this->height_ = this->resize_height_ > 0 ? this->resize_height_ : 1;
+  this->type_ = image::IMAGE_TYPE_RGB565;
+  this->bpp_ = 16;
+  this->data_start_ = nullptr;
+  this->has_transparency_ = image::TRANSPARENCY_OPAQUE;
 }
 
+// MODIFIER la méthode loop() existante:
 void SdImageComponent::loop() {
-  // Retry logic for auto-loading
-  if (this->retry_load_ && !this->image_loaded_) {
+  // Plus de retry individuel - tout est géré au niveau du StorageComponent
+  // ou par le système on-demand
+}
+
+// AJOUTER ces nouvelles méthodes:
+
+bool SdImageComponent::ensure_loaded() {
+  // Si déjà chargée, OK
+  if (this->image_loaded_ && !this->image_buffer_.empty()) {
+    return true;
+  }
+  
+  // Si auto_load global est activé, attendre que le système global charge
+  if (this->should_auto_load()) {
+    // En mode auto-load global, on fait un seul essai on-demand si pas encore chargé
+    if (this->load_state_ == LoadState::NOT_LOADED) {
+      ESP_LOGI(TAG_IMAGE, "Global auto-load active but image not loaded yet, trying once: %s", 
+               this->file_path_.c_str());
+      return this->load_image();
+    }
+    return false; // Laisser le système global gérer
+  }
+  
+  // Mode on-demand pur (auto_load global = false)
+  if (this->load_state_ == LoadState::LOADING) {
+    return false;
+  }
+  
+  if (this->load_state_ == LoadState::FAILED) {
     uint32_t now = millis();
-    if (now - this->last_retry_attempt_ > RETRY_INTERVAL_MS) {
-      this->last_retry_attempt_ = now;
-      ESP_LOGI(TAG_IMAGE, "Retrying auto-load...");
-      
-      if (this->load_image()) {
-        ESP_LOGI(TAG_IMAGE, "Image loaded successfully on retry!");
-        this->retry_load_ = false;
-      } else {
-        ESP_LOGW(TAG_IMAGE, "Retry failed, will try again later");
-      }
+    if (now - this->last_load_attempt_ < LOAD_RETRY_DELAY_MS) {
+      return false;
+    }
+    if (this->load_retry_count_ >= MAX_LOAD_RETRIES) {
+      return false;
     }
   }
+  
+  ESP_LOGI(TAG_IMAGE, "On-demand loading: %s", this->file_path_.c_str());
+  
+  this->load_state_ = LoadState::LOADING;
+  this->last_load_attempt_ = millis();
+  
+  bool success = this->load_image_from_path(this->file_path_);
+  
+  if (success) {
+    this->load_state_ = LoadState::LOADED;
+    this->load_retry_count_ = 0;
+  } else {
+    this->load_state_ = LoadState::FAILED;
+    this->load_retry_count_++;
+  }
+  
+  return success;
 }
 
 void SdImageComponent::dump_config() {
