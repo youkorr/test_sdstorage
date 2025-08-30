@@ -54,7 +54,7 @@ enum class SdByteOrder {
 };
 
 // =====================================================
-// StorageComponent - Main Storage Class
+// StorageComponent - Main Storage Class AVEC AUTO_LOAD GLOBAL
 // =====================================================
 class StorageComponent : public Component {
  public:
@@ -70,11 +70,20 @@ class StorageComponent : public Component {
   void set_sd_component(sd_mmc_card::SdMmc *sd_component) { this->sd_component_ = sd_component; }
   void set_root_path(const std::string &root_path) { this->root_path_ = root_path; }
   
+  // NOUVEAU: Configuration auto_load global
+  void set_auto_load(bool auto_load) { this->auto_load_ = auto_load; }
+  bool get_auto_load() const { return this->auto_load_; }
+  
   // File methods
   bool file_exists_direct(const std::string &path);
   std::vector<uint8_t> read_file_direct(const std::string &path);
   bool write_file_direct(const std::string &path, const std::vector<uint8_t> &data);
   size_t get_file_size(const std::string &path);
+  
+  // NOUVEAU: Gestion des images SD enregistrées
+  void register_sd_image(SdImageComponent *image) { this->sd_images_.push_back(image); }
+  void load_all_images();
+  void unload_all_images();
   
   // Getters
   const std::string &get_platform() const { return this->platform_; }
@@ -85,10 +94,14 @@ class StorageComponent : public Component {
   std::string platform_;
   std::string root_path_{"/"}; 
   sd_mmc_card::SdMmc *sd_component_{nullptr};
+  
+  // NOUVEAU: Auto-load global et gestion des images
+  bool auto_load_{true}; // Par défaut à true pour compatibilité
+  std::vector<SdImageComponent*> sd_images_;
 };
 
 // =====================================================
-// SdImageComponent - SD Card Image Component avec chargement à la demande
+// SdImageComponent - SD Card Image Component
 // =====================================================
 class SdImageComponent : public Component, public image::Image {
  public:
@@ -104,19 +117,24 @@ class SdImageComponent : public Component, public image::Image {
   
   // Configuration setters
   void set_file_path(const std::string &path) { this->file_path_ = path; }
-  void set_storage_component(StorageComponent *storage) { this->storage_component_ = storage; }
+  void set_storage_component(StorageComponent *storage) { 
+    this->storage_component_ = storage; 
+    // S'enregistrer auprès du composant storage principal
+    if (storage) {
+      storage->register_sd_image(this);
+    }
+  }
   void set_resize(int width, int height) { 
     this->resize_width_ = width; 
     this->resize_height_ = height; 
   }
   void set_format(ImageFormat format) { this->format_ = format; }
-  void set_auto_load(bool auto_load) { this->auto_load_ = auto_load; }
   
   // Compatibility methods for YAML configuration
   void set_output_format_string(const std::string &format);
   void set_byte_order_string(const std::string &byte_order);
   
-  // Override Image methods avec chargement automatique à la demande
+  // Override Image methods avec chargement automatique intégré
   void draw(int x, int y, display::Display *display, Color color_on, Color color_off) override;
   int get_width() const override;
   int get_height() const override;
@@ -127,19 +145,16 @@ class SdImageComponent : public Component, public image::Image {
   void unload_image();
   bool reload_image();
   
-  // Méthodes pour chargement automatique intégré
-  bool ensure_loaded();
-  bool load_when_needed();
-  bool load_dimensions_only() const;
+  // NOUVEAU: Méthodes pour système hybride (auto_load global + on-demand)
+  bool should_auto_load() const { 
+    return this->storage_component_ && this->storage_component_->get_auto_load(); 
+  }
+  bool ensure_loaded(); // Chargement intelligent selon le mode
   
   // Finalize loading
   void finalize_image_load();
   
-  // Gestion mémoire PSRAM améliorée
-  void force_free_psram();
-  size_t get_memory_usage() const;
-  
-  // Status
+  // Status et accès aux données
   bool is_loaded() const { return this->image_loaded_; }
   const std::string &get_file_path() const { return this->file_path_; }
   
@@ -147,6 +162,10 @@ class SdImageComponent : public Component, public image::Image {
   const std::vector<uint8_t> &get_image_buffer() const { return this->image_buffer_; }
   uint8_t* get_image_data() { return this->image_buffer_.empty() ? nullptr : this->image_buffer_.data(); }
   size_t get_image_data_size() const { return this->image_buffer_.size(); }
+  
+  // NOUVEAU: Méthodes pour LVGL avec chargement automatique
+  const uint8_t* get_image_data_for_lvgl();
+  size_t get_image_data_size_for_lvgl();
   
   // Debug info
   std::string get_debug_info() const;
@@ -157,7 +176,6 @@ class SdImageComponent : public Component, public image::Image {
   StorageComponent *storage_component_{nullptr};
   std::vector<uint8_t> image_buffer_;
   bool image_loaded_{false};
-  bool auto_load_{true};
   
   // Image properties - local
   int image_width_{0};
@@ -168,7 +186,7 @@ class SdImageComponent : public Component, public image::Image {
   SdByteOrder byte_order_{SdByteOrder::LITTLE_ENDIAN_SD};
 
  private:
-  // État de chargement amélioré pour système à la demande
+  // État de chargement pour système hybride
   enum class LoadState {
     NOT_LOADED,
     LOADING,
@@ -180,12 +198,7 @@ class SdImageComponent : public Component, public image::Image {
   uint32_t last_load_attempt_{0};
   uint32_t load_retry_count_{0};
   static const uint32_t MAX_LOAD_RETRIES = 3;
-  static const uint32_t LOAD_RETRY_DELAY_MS = 500;
-  
-  // Cache des dimensions pour éviter le chargement juste pour obtenir les tailles
-  mutable int cached_width_{0};
-  mutable int cached_height_{0};
-  mutable bool dimensions_cached_{false};
+  static const uint32_t LOAD_RETRY_DELAY_MS = 1000;
   
   // Retry logic pour auto-loading (legacy)
   bool retry_load_{false};
@@ -249,7 +262,6 @@ class SdImageComponent : public Component, public image::Image {
   // Utility methods
   void list_directory_contents(const std::string &dir_path);
   bool extract_jpeg_dimensions(const std::vector<uint8_t> &data, int &width, int &height) const;
-  bool extract_png_dimensions(const std::vector<uint8_t> &data, int &width, int &height) const;
   
   // Format helpers
   std::string format_to_string() const;
@@ -296,6 +308,37 @@ class SdImageUnloadAction : public Action<Ts...> {
 
  private:
   SdImageComponent *parent_;
+};
+
+// NOUVEAU: Actions pour contrôle global
+template<typename... Ts> 
+class StorageLoadAllAction : public Action<Ts...> {
+ public:
+  explicit StorageLoadAllAction(StorageComponent *parent) : parent_(parent) {}
+  
+  void play(Ts... x) override {
+    if (this->parent_ != nullptr) {
+      this->parent_->load_all_images();
+    }
+  }
+
+ private:
+  StorageComponent *parent_;
+};
+
+template<typename... Ts> 
+class StorageUnloadAllAction : public Action<Ts...> {
+ public:
+  explicit StorageUnloadAllAction(StorageComponent *parent) : parent_(parent) {}
+  
+  void play(Ts... x) override {
+    if (this->parent_ != nullptr) {
+      this->parent_->unload_all_images();
+    }
+  }
+
+ private:
+  StorageComponent *parent_;
 };
 
 }  // namespace storage
